@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.0.6] 2026-10-20
+
+Subjects, made by hand. A subject is a thing memories are about, a person, a pet, an asset, a project, an area or a topic. It has a card (a memory holding a short brief), fields, aliases and a scope. Nothing files memories under a subject by itself yet, you link a memory to a card with an `about` link. Migration 0006.
+
+1. **Routes and scripts.** `POST /subject`, `POST /subject/update`, `GET /subjects` and `GET /subject`, and the `subject.py` script (list, show, add, set, alias, scope, retire). Only the admin token and a browser login can create or change a card, and a person subject can never hold health or money fields.
+2. **Private subjects.** A subject can be private. A device token whose device has `allow_private` off never sees a private subject, its card, or a memory whose only `about` links go to private subjects, on recall, list, entry, history and links. `devices.py allow-private ID on|off` sets the flag, and it is yours to run, not the agent's.
+3. **Recall.** With the Worker setting `SUBJECTS` on, a recall that finds a relevant memory of a subject also returns its card, and the hook prints it above the memories. `GET /recall?subject=SLUG` lists a subject's members. With `SUBJECTS` off, which is the default, nothing about recall changes.
+4. **Dashboard.** A Subjects screen with a table, a card drawer, a New subject form, and a Subjects row on the memory drawer.
+5. **Backup.** Export and import carry subjects and each device's `allow_private`. A script, `scripts/subjects-from-people.mjs`, turns the saved people memories into person subjects (a dry run unless you pass `--apply`).
+
 ## [2.0.5] 2026-10-20
 
 Links between memories get a closed list of types, a record of who made each link, and a way to take one back. This is the first step toward grouping memories by subject, and nothing recalls or ranks by a link yet.

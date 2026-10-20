@@ -206,9 +206,9 @@ test("routes need auth", async () => {
   }
 });
 
-test("the Worker version is 2.0.5 and matches package.json and the plugin manifest", () => {
+test("the Worker version is 2.0.6 and matches package.json and the plugin manifest", () => {
   const read = (rel) => JSON.parse(readFileSync(new URL(rel, import.meta.url), "utf8"));
-  assert.equal(VERSION, "2.0.5");
+  assert.equal(VERSION, "2.0.6");
   assert.equal(read("../package.json").version, VERSION);
   assert.equal(read("../../.claude-plugin/plugin.json").version, VERSION);
 });
