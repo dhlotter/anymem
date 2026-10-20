@@ -1,4 +1,4 @@
-// Hash routes. #/home, #/search?q=, #/memories, #/memories/<id>, #/activity, #/trash, #/capsule, #/people, #/health, #/audit. Pure.
+// Hash routes. #/home, #/search?q=, #/memories, #/memories/<id>, #/activity, #/trash, #/capsule, #/people, #/subjects, #/health, #/audit. Pure.
 // The old #/browse and #/memory/<id> links still work and land on the memories screen.
 
 /** The sidebar, in order. A group is a stretch of the list that sits together, with a hairline between groups. */
@@ -10,6 +10,7 @@ export const NAV = [
   { name: "trash", label: "Trash", icon: "trash", group: 1 },
   { name: "capsule", label: "Capsule", icon: "capsule", group: 2 },
   { name: "people", label: "People", icon: "people", group: 2 },
+  { name: "subjects", label: "Subjects", icon: "subjects", group: 2 },
   { name: "health", label: "Health", icon: "health", group: 3 },
   { name: "audit", label: "Audit", icon: "audit", group: 3 },
 ];
