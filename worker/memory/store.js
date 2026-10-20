@@ -1,6 +1,6 @@
 // The storage layer. Every change to a memory is one D1 batch that writes the old state to memory_versions,
 // the new row, the tags and the search rows together. D1 runs a batch as a transaction.
-import { badRequest, conflict, HttpError, notFound } from "../http.js";
+import { badRequest, conflict, forbidden, HttpError, notFound } from "../http.js";
 import { isPinnedByTags, KINDS, parseMemory, STATUSES } from "./parse.js";
 import { summarize } from "./diff.js";
 import { harnessLabel, harnessValues } from "../harnesses.js";
@@ -353,16 +353,48 @@ export function createStore(db, now = Date.now) {
     },
 
     /**
-     * Add a typed link between two live memories. Returns created false when it already existed.
+     * Add a typed link between two live memories. Returns created false when it already existed. The vocabulary is checked by the route.
+     * @param {{madeBy?: "user" | "system", confidence?: number | null}} [by] who made it, and how sure the system was
      * @returns {Promise<{created: boolean}>}
      */
-    async link(sourceId, targetId, type) {
+    async link(sourceId, targetId, type, { madeBy = "user", confidence = null } = {}) {
       if (typeof type !== "string" || !LINK_TYPE.test(type.trim().toLowerCase())) throw badRequest("type must be a short lowercase word such as about_person.");
       if (sourceId === targetId) throw badRequest("A memory cannot link to itself.");
       const { results } = await db.prepare("SELECT id FROM memories WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?))").bind(JSON.stringify([sourceId, targetId])).all();
       if (results.length < 2) throw notFound("One of the two memories does not exist.");
-      const res = await db.prepare("INSERT OR IGNORE INTO links (source_id, target_id, link_type, created_at) VALUES (?, ?, ?, ?)").bind(sourceId, targetId, type.trim().toLowerCase(), now()).run();
+      const res = await db.prepare("INSERT OR IGNORE INTO links (source_id, target_id, link_type, created_at, made_by, confidence) VALUES (?, ?, ?, ?, ?, ?)").bind(sourceId, targetId, type.trim().toLowerCase(), now(), madeBy, confidence).run();
       return { created: res.meta.changes > 0 };
+    },
+
+    /**
+     * Remove a link. A link the system made is also written to link_rejections, so the system never remakes it.
+     * With userOnly, a link the system made is refused (403 admin_only) and left in place.
+     * @returns {Promise<{removed: boolean}>}
+     */
+    async unlink(sourceId, targetId, type, { userOnly = false } = {}) {
+      if (typeof type !== "string" || !LINK_TYPE.test(type.trim().toLowerCase())) throw badRequest("type must be a short lowercase word such as about_person.");
+      const t = type.trim().toLowerCase();
+      const where = "source_id = ? AND target_id = ? AND link_type = ?";
+      const row = await db.prepare(`SELECT made_by FROM links WHERE ${where}`).bind(sourceId, targetId, t).first();
+      if (!row) return { removed: false };
+      if (row.made_by === "system" && userOnly) throw forbidden("Only the admin token or a browser login can remove a link the system made.", "admin_only");
+      // The rejection is written first, from the row that the second statement then deletes.
+      const [, del] = await db.batch([
+        db.prepare(`INSERT OR IGNORE INTO link_rejections (source_id, target_id, link_type, created_at) SELECT source_id, target_id, link_type, ? FROM links WHERE ${where} AND made_by = 'system'`).bind(now(), sourceId, targetId, t),
+        db.prepare(`DELETE FROM links WHERE ${where}`).bind(sourceId, targetId, t),
+      ]);
+      return { removed: del.meta.changes > 0 };
+    },
+
+    /**
+     * The links of one memory in both directions, grouped by type and newest first. The other end must be live.
+     * @returns {Promise<{type: string, direction: "out" | "in", other_id: string, other_name: string, made_by: string, confidence: number | null, created_at: number}[] | null>} null when the memory does not exist
+     */
+    async links(id) {
+      if (!(await db.prepare("SELECT 1 AS n FROM memories WHERE id = ?").bind(id).first())) return null;
+      const side = (dir, own, other) => `SELECT l.link_type AS type, '${dir}' AS direction, l.${other} AS other_id, m.name AS other_name, l.made_by AS made_by, l.confidence AS confidence, l.created_at AS created_at FROM links l JOIN memories m ON m.id = l.${other} WHERE l.${own} = ? AND m.deleted_at IS NULL`;
+      const { results } = await db.prepare(`${side("out", "source_id", "target_id")} UNION ALL ${side("in", "target_id", "source_id")} ORDER BY type, created_at DESC, other_id`).bind(id, id).all();
+      return results;
     },
 
     /**

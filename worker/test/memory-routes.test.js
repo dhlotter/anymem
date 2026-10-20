@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createApp } from "./helpers/app.js";
+import { createStore } from "../memory/store.js";
 import { raw, UI_HEADERS } from "./helpers/ui.js";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -10,7 +11,7 @@ const capture = async (app, content, extra = {}) => (await post(app, "/capture",
 const ROUTES = [
   ["GET", "/entry?id=x"], ["GET", "/list"], ["GET", "/history?id=x"],
   ["POST", "/capture"], ["POST", "/update"], ["POST", "/append"], ["POST", "/status"],
-  ["POST", "/forget"], ["POST", "/restore"], ["POST", "/undo"], ["POST", "/link"],
+  ["POST", "/forget"], ["POST", "/restore"], ["POST", "/undo"], ["POST", "/link"], ["POST", "/unlink"], ["GET", "/links?id=x"],
 ];
 
 test("every memory route needs a bearer token", async () => {
@@ -149,7 +150,7 @@ test("a device token shares 40 writes in 10 minutes across every write route, an
   assert.equal(refused.json.code, "rate_limited");
   assert.match(refused.headers.get("retry-after"), /^\d+$/);
   assert.equal(refused.json.retry_after, Number(refused.headers.get("retry-after")));
-  for (const [path, body] of [["/append", { id, addition: "x" }], ["/status", { id, status: "deprecated" }], ["/forget", { id }], ["/restore", { id }], ["/undo", { id }], ["/link", { source_id: id, target_id: other, type: "related" }]]) {
+  for (const [path, body] of [["/append", { id, addition: "x" }], ["/status", { id, status: "deprecated" }], ["/forget", { id }], ["/restore", { id }], ["/undo", { id }], ["/link", { source_id: id, target_id: other, type: "related" }], ["/unlink", { source_id: id, target_id: other, type: "related" }]]) {
     assert.equal((await post(app, path, body, { token })).status, 429, path);
   }
   assert.equal((await app.call(`/entry?id=${id}`, { token })).status, 200, "reads are not counted");
@@ -256,7 +257,7 @@ test("update, compare and set, append, status over HTTP", async () => {
     ["/update", {}], ["/update", { id }], ["/update", { id, content: 3 }], ["/update", { id, tags: "x" }], ["/update", { id, content: "x", if_updated_at: "1" }], ["/update", { id, content: "x", if_updated_at: 1.5 }],
     ["/append", { id }], ["/append", { id, addition: " " }], ["/append", { addition: "x" }],
     ["/status", { id }], ["/status", { id, status: "draft" }], ["/status", { status: "active" }],
-    ["/forget", {}], ["/forget", { id: 5 }], ["/restore", {}], ["/undo", {}], ["/link", {}], ["/link", { source_id: id }],
+    ["/forget", {}], ["/forget", { id: 5 }], ["/restore", {}], ["/undo", {}], ["/link", {}], ["/link", { source_id: id }], ["/unlink", {}], ["/unlink", { source_id: id }], ["/unlink", { source_id: id, target_id: id }],
   ];
   for (const [path, body] of bad) assert.equal((await post(app, path, body)).status, 400, `${path} ${JSON.stringify(body)}`);
   for (const [path, body] of [["/update", { content: "x" }], ["/append", { addition: "x" }], ["/status", { status: "active" }], ["/forget", {}], ["/restore", {}], ["/undo", {}]]) {
@@ -316,10 +317,142 @@ test("POST /link creates, dedupes and checks both ends", async () => {
   const b = (await capture(app, "b")).id;
   assert.deepEqual((await post(app, "/link", { source_id: a, target_id: b, type: "about_person" })).json, { ok: true, created: true });
   assert.deepEqual((await post(app, "/link", { source_id: a, target_id: b, type: "about_person" })).json, { ok: true, created: false });
-  assert.equal((await post(app, "/link", { source_id: a, target_id: "missing", type: "x" })).status, 404);
-  assert.equal((await post(app, "/link", { source_id: a, target_id: a, type: "x" })).status, 400);
+  assert.equal((await post(app, "/link", { source_id: a, target_id: "missing", type: "related" })).status, 404);
+  assert.equal((await post(app, "/link", { source_id: a, target_id: a, type: "related" })).status, 400);
   assert.equal((await post(app, "/link", { source_id: a, target_id: b })).status, 400);
   assert.equal((await app.env.DB.prepare("SELECT COUNT(*) AS n FROM links").first()).n, 1);
+});
+
+test("POST /link takes only the listed types, and refuses the two the system writes", async () => {
+  const app = await createApp();
+  const a = (await capture(app, "a")).id;
+  const b = (await capture(app, "b")).id;
+  for (const type of ["about", "part_of", "owns", "affects", "decided", "contradicts", "about_person", "related"]) {
+    assert.equal((await post(app, "/link", { source_id: a, target_id: b, type })).json.created, true, type);
+  }
+  assert.equal((await post(app, "/link", { source_id: b, target_id: a, type: " Related " })).json.created, true, "the type is trimmed and lowercased");
+  const unknown = await post(app, "/link", { source_id: a, target_id: b, type: "likes" });
+  assert.deepEqual([unknown.status, unknown.json.code], [400, "bad_link_type"]);
+  assert.match(unknown.json.error, /about, part_of, owns, affects, decided, supersedes, contradicts, derived_from, about_person, related/);
+  assert.equal((await post(app, "/link", { source_id: a, target_id: b, type: 5 })).json.code, "bad_link_type");
+  for (const type of ["supersedes", "derived_from"]) {
+    const res = await post(app, "/link", { source_id: a, target_id: b, type });
+    assert.deepEqual([res.status, res.json.code], [400, "reserved_link_type"], type);
+  }
+  const made = (await app.env.DB.prepare("SELECT DISTINCT made_by, confidence FROM links").all()).results;
+  assert.deepEqual(made.map((r) => ({ ...r })), [{ made_by: "user", confidence: null }], "a link from the route is the user's");
+});
+
+test("POST /unlink removes a user link and writes no rejection", async () => {
+  const app = await createApp();
+  const a = (await capture(app, "a")).id;
+  const b = (await capture(app, "b")).id;
+  await post(app, "/link", { source_id: a, target_id: b, type: "owns" });
+  assert.deepEqual((await post(app, "/unlink", { source_id: b, target_id: a, type: "owns" })).json, { ok: true, removed: false }, "the other direction is another link");
+  assert.deepEqual((await post(app, "/unlink", { source_id: a, target_id: b, type: " OWNS " })).json, { ok: true, removed: true });
+  assert.deepEqual((await post(app, "/unlink", { source_id: a, target_id: b, type: "owns" })).json, { ok: true, removed: false });
+  assert.equal((await app.env.DB.prepare("SELECT COUNT(*) AS n FROM links").first()).n, 0);
+  assert.equal((await app.env.DB.prepare("SELECT COUNT(*) AS n FROM link_rejections").first()).n, 0);
+  assert.equal((await post(app, "/unlink", { source_id: a, target_id: b, type: "owns", extra: 1 })).status, 200);
+  assert.equal((await post(app, "/unlink", { source_id: a, target_id: b, type: "Not a type!" })).status, 400);
+});
+
+test("removing a link the system made records a rejection, which a second removal does not repeat", async () => {
+  const app = await createApp();
+  const a = (await capture(app, "a")).id;
+  const b = (await capture(app, "b")).id;
+  const store = createStore(app.env.DB, () => app.clock.t);
+  await store.link(a, b, "affects", { madeBy: "system", confidence: 0.8 });
+  await store.link(a, b, "supersedes", { madeBy: "system", confidence: 0.9 });
+  app.clock.t += 1000;
+  assert.deepEqual((await post(app, "/unlink", { source_id: a, target_id: b, type: "affects" })).json, { ok: true, removed: true });
+  const rejected = (await app.env.DB.prepare("SELECT source_id, target_id, link_type, created_at FROM link_rejections").all()).results;
+  assert.deepEqual(rejected.map((r) => ({ ...r })), [{ source_id: a, target_id: b, link_type: "affects", created_at: app.clock.t }]);
+  assert.deepEqual((await post(app, "/unlink", { source_id: a, target_id: b, type: "affects" })).json, { ok: true, removed: false });
+  assert.equal((await app.env.DB.prepare("SELECT COUNT(*) AS n FROM link_rejections").first()).n, 1);
+  assert.equal((await post(app, "/unlink", { source_id: a, target_id: b, type: "supersedes" })).json.removed, true, "the admin may remove a reserved type that the system wrote");
+});
+
+test("a device token may remove a user link, not a system link, and not a link of a protected memory", async () => {
+  const app = await createApp();
+  const { token } = (await post(app, "/devices", { label: "laptop" })).json;
+  const a = (await capture(app, "a")).id;
+  const b = (await capture(app, "b")).id;
+  const core = (await post(app, "/capture", { content: "core identity note", origin: "system", tags: ["capsule:core", "capsule-slot:identity", "status:canonical"] })).json.id;
+  const store = createStore(app.env.DB, () => app.clock.t);
+  await store.link(a, b, "related");
+  await store.link(b, a, "affects", { madeBy: "system", confidence: 0.7 });
+  await store.link(a, core, "about");
+  await store.link(core, b, "owns", { madeBy: "system", confidence: 0.5 });
+  const links = async () => (await app.env.DB.prepare("SELECT COUNT(*) AS n FROM links").first()).n;
+  const refused = async (body) => {
+    const res = await post(app, "/unlink", body, { token });
+    assert.deepEqual([res.status, res.json.code], [403, "admin_only"], JSON.stringify(body));
+  };
+  await refused({ source_id: b, target_id: a, type: "affects" });
+  await refused({ source_id: a, target_id: core, type: "about" });
+  await refused({ source_id: core, target_id: b, type: "owns" });
+  assert.equal(await links(), 4, "nothing was removed");
+  assert.equal((await app.env.DB.prepare("SELECT COUNT(*) AS n FROM link_rejections").first()).n, 0);
+  assert.deepEqual((await post(app, "/unlink", { source_id: a, target_id: b, type: "related" }, { token })).json, { ok: true, removed: true });
+  assert.deepEqual((await post(app, "/unlink", { source_id: a, target_id: b, type: "related" }, { token })).json, { ok: true, removed: false });
+
+  const jwt = app.browserJwt("me@example.com");
+  const browser = await raw(app, "/unlink", { method: "POST", jwt, headers: UI_HEADERS, body: { source_id: b, target_id: a, type: "affects" } });
+  assert.equal(browser.status, 200, "a browser login may remove a system link");
+  assert.equal((await post(app, "/unlink", { source_id: a, target_id: core, type: "about" })).json.removed, true, "and the admin token a link of a protected memory");
+  assert.equal(await links(), 1);
+  assert.equal((await app.env.DB.prepare("SELECT link_type FROM link_rejections").first()).link_type, "affects");
+});
+
+test("GET /links lists both directions grouped by type, newest first, with live ends only", async () => {
+  const app = await createApp();
+  const { token } = (await post(app, "/devices", { label: "laptop" })).json;
+  const me = (await capture(app, "me note", { name: "me-note" })).id;
+  const named = async (name) => {
+    const id = (await capture(app, `${name} text`)).id;
+    await app.env.DB.prepare("UPDATE memories SET name = ? WHERE id = ?").bind(name, id).run();
+    return id;
+  };
+  const x = await named("x-note");
+  const y = await named("y-note");
+  const z = await named("z-note");
+  const gone = await named("gone-note");
+  const store = createStore(app.env.DB, () => app.clock.t);
+  await store.link(me, x, "related");
+  app.clock.t += 10;
+  await store.link(me, y, "related");
+  app.clock.t += 10;
+  await store.link(z, me, "about", { madeBy: "system", confidence: 0.75 });
+  await store.link(me, gone, "owns");
+  await post(app, "/forget", { id: gone });
+  const res = await app.call(`/links?id=${me}`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.json, {
+    ok: true,
+    id: me,
+    links: [
+      { type: "about", direction: "in", other_id: z, other_name: "z-note", made_by: "system", confidence: 0.75, created_at: app.clock.t },
+      { type: "related", direction: "out", other_id: y, other_name: "y-note", made_by: "user", confidence: null, created_at: app.clock.t - 10 },
+      { type: "related", direction: "out", other_id: x, other_name: "x-note", made_by: "user", confidence: null, created_at: app.clock.t - 20 },
+    ],
+  });
+  assert.equal((await app.call(`/links?id=${me}`, { token })).status, 200, "a device token reads links");
+  assert.equal((await app.call(`/links?id=${me}`, { token: null, jwt: app.browserJwt("me@example.com") })).status, 200, "a browser login too");
+  assert.deepEqual((await app.call(`/links?id=${gone}`)).json.links.map((l) => l.other_id), [me], "a trashed memory still answers, and lists its live ends");
+  assert.equal((await app.call("/links?id=nope")).status, 404);
+  assert.equal((await app.call("/links")).status, 400);
+  const rows = (await app.call("/audit?limit=500")).json.entries.filter((r) => r.route === "/links");
+  assert.deepEqual(rows.at(-1).memory_ids, [me], "the first call, oldest last");
+});
+
+test("a link with a free text type from before the list is listed and can be removed as it was stored", async () => {
+  const app = await createApp();
+  const a = (await capture(app, "a")).id;
+  const b = (await capture(app, "b")).id;
+  await createStore(app.env.DB, () => app.clock.t).link(a, b, "related_to");
+  assert.deepEqual((await app.call(`/links?id=${a}`)).json.links.map((l) => l.type), ["related_to"]);
+  assert.equal((await post(app, "/unlink", { source_id: a, target_id: b, type: "related_to" })).json.removed, true);
 });
 
 test("GET /list filters, paging and bad parameters over HTTP", async () => {
@@ -367,7 +500,8 @@ test("audit rows list the memory ids each call touched", async () => {
   const app = await createApp();
   const a = (await capture(app, "a")).id;
   const b = (await capture(app, "b")).id;
-  await post(app, "/link", { source_id: a, target_id: b, type: "x" });
+  await post(app, "/link", { source_id: a, target_id: b, type: "related" });
+  await post(app, "/unlink", { source_id: b, target_id: a, type: "related" });
   await post(app, "/update", { id: a, content: "never-logged-marker-zq" });
   await app.call(`/entry?id=${a}`);
   await app.call("/list");
@@ -378,6 +512,7 @@ test("audit rows list the memory ids each call touched", async () => {
   assert.deepEqual(at("/capture", 0).memory_ids, [a]);
   assert.deepEqual(at("/capture", 1).memory_ids, [b]);
   assert.deepEqual(at("/link").memory_ids, [a, b]);
+  assert.deepEqual(at("/unlink").memory_ids, [b, a]);
   assert.deepEqual(at("/update", 0).memory_ids, [a]);
   assert.deepEqual(at("/entry").memory_ids, [a]);
   assert.deepEqual(at("/list").memory_ids.sort(), [a, b].sort());

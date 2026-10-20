@@ -1,4 +1,4 @@
--- The full anymem v2 schema. Migrations 0001, 0002 and 0003 together create exactly this.
+-- The full anymem v2 schema. Migrations 0001 to 0005 together create exactly this.
 -- Times are milliseconds since the epoch. Tags are lowercase. A live memory has deleted_at and valid_until both null.
 -- The Worker never applies schema on a request, worker/migrate.js does.
 
@@ -76,14 +76,21 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5 (
   tokenize = 'trigram'
 );
 
+-- made_by and confidence are on the created_at line because that is where ALTER TABLE ADD COLUMN puts them in migration 0005.
 CREATE TABLE IF NOT EXISTS links (
   source_id TEXT NOT NULL REFERENCES memories (id) ON DELETE CASCADE,
   target_id TEXT NOT NULL REFERENCES memories (id) ON DELETE CASCADE,
   link_type TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL, made_by TEXT NOT NULL DEFAULT 'user' CHECK (made_by IN ('user','system')), confidence REAL,
   PRIMARY KEY (source_id, target_id, link_type)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_links_target ON links (target_id);
+
+-- A link the user turned down, so the system never makes it again.
+CREATE TABLE IF NOT EXISTS link_rejections (
+  source_id TEXT NOT NULL, target_id TEXT NOT NULL, link_type TEXT NOT NULL, created_at INTEGER NOT NULL,
+  PRIMARY KEY (source_id, target_id, link_type)
+) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS devices (
   id TEXT PRIMARY KEY,

@@ -13,7 +13,7 @@ import { downloadBackupRoute, exportRoute, listBackupsRoute, runBackupRoute } fr
 import { runMaintenance, runMaintenanceRoute } from "./cron/maintenance.js";
 import { createDevice, listDevices, revokeDevice } from "./devices.js";
 import { HttpError, errorResponse, json, notFound } from "./http.js";
-import { append, forget, getEntry, history, link, listEntries, restore, setStatus, undo, update } from "./memory/routes.js";
+import { append, forget, getEntry, getLinks, history, link, listEntries, restore, setStatus, undo, unlink, update } from "./memory/routes.js";
 import { harnessRoute, importRoute, questionsRoute, reindexRoute } from "./admin/routes.js";
 import { extractRoute } from "./extract/extract.js";
 import { readProbe, startProbe } from "./search/probe.js";
@@ -49,6 +49,8 @@ const ROUTES = [
   { method: "POST", path: "/restore", browserWrite: true, writes: true, handler: restore },
   { method: "POST", path: "/undo", browserWrite: true, writes: true, handler: undo },
   { method: "POST", path: "/link", browserWrite: true, writes: true, handler: link },
+  { method: "POST", path: "/unlink", browserWrite: true, writes: true, handler: unlink },
+  { method: "GET", path: "/links", browser: true, handler: getLinks },
   { method: "GET", path: "/recall", browser: true, model: true, handler: getRecall },
   { method: "POST", path: "/admin/reindex", admin: true, handler: reindexRoute },
   { method: "POST", path: "/admin/questions", admin: true, handler: questionsRoute },

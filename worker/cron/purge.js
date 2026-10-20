@@ -12,7 +12,7 @@ const VECTOR_CALL = 500; // ids in one Vectorize delete, the size the indexer us
 export const PURGED_KEY = "purged_total";
 
 /**
- * Delete memories that have been in the trash for more than 14 days, with their tags, keys, links, versions and vectors.
+ * Delete memories that have been in the trash for more than 14 days, with their tags, keys, links, link rejections, versions and vectors.
  * Each batch of 100 costs 4 subrequests, plus one more for every 500 vectors it deletes.
  * @returns {Promise<{purged: number, vectors: number, remaining: boolean}>}
  */
@@ -39,6 +39,7 @@ export async function purgeTrash(env, { now, budget }) {
       env.DB.prepare(`DELETE FROM memory_keys WHERE ${own}`).bind(ids),
       env.DB.prepare(`DELETE FROM recall_log WHERE ${own}`).bind(ids),
       env.DB.prepare("DELETE FROM links WHERE source_id IN (SELECT value FROM json_each(?)) OR target_id IN (SELECT value FROM json_each(?))").bind(ids, ids),
+      env.DB.prepare("DELETE FROM link_rejections WHERE source_id IN (SELECT value FROM json_each(?)) OR target_id IN (SELECT value FROM json_each(?))").bind(ids, ids),
       env.DB.prepare("DELETE FROM memories WHERE id IN (SELECT value FROM json_each(?))").bind(ids),
       env.DB.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + CAST(excluded.value AS INTEGER) AS TEXT)").bind(PURGED_KEY, String(results.length)),
     ]);

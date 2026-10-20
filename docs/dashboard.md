@@ -35,7 +35,7 @@ The old addresses `#/browse` and `#/memory/ID` still work and land on Memories.
 
 ## What it can write
 
-A browser login may change memories only through the routes the screens use, `/capture`, `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo` and `/link`. Through `/capture` it may only save profile and person notes, which is what the People screen needs. It cannot create device tokens, import, reindex, run the nightly job or run a backup. Each write must come from the dashboard's own page. See [security](security.md) for the checks.
+A browser login may change memories only through the routes the screens use, `/capture`, `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link` and `/unlink`. Through `/capture` it may only save profile and person notes, which is what the People screen needs. It cannot create device tokens, import, reindex, run the nightly job or run a backup. Each write must come from the dashboard's own page. See [security](security.md) for the checks.
 
 The insight routes only read. A test checks that calling each of them changes no table except the audit trail.
 

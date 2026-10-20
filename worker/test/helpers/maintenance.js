@@ -68,6 +68,7 @@ export async function dump(app) {
     versions: await q("SELECT memory_id, seq, snapshot, reason, created_at FROM memory_versions ORDER BY memory_id, seq"),
     questions: await q("SELECT memory_id, position, text, created_at FROM memory_keys WHERE key_type = 'question' ORDER BY memory_id, position"),
     links: await q("SELECT * FROM links ORDER BY source_id, target_id, link_type"),
+    link_rejections: await q("SELECT * FROM link_rejections ORDER BY source_id, target_id, link_type"),
     devices: await q("SELECT * FROM devices ORDER BY id"),
     fts: await q("SELECT memory_id, name, description, body, keys FROM memory_fts ORDER BY memory_id"),
   };
@@ -77,7 +78,7 @@ const TRICKY = "Line one  with  double spaces\tand a tab.\r\nSecond line, emoji 
 
 /**
  * A store with one of everything a backup carries: memories of several origins, tags, history, a closed and a trashed
- * memory, a link, question keys, usage counts, probation, a project, and two devices (one revoked).
+ * memory, links (one made by the system, one rejected), question keys, usage counts, probation, a project, and two devices (one revoked).
  * @returns {Promise<{ids: Record<string, string>, token: string}>}
  */
 export async function populate(app) {
@@ -101,6 +102,8 @@ export async function populate(app) {
   await store.supersede(ids.newer, ids.older, app.clock.t, "merge");
   await store.link(ids.explicit, ids.capture, "related_to");
   await store.link(ids.profile, ids.explicit, "about_person");
+  await store.link(ids.imported, ids.explicit, "affects", { madeBy: "system", confidence: 0.85 });
+  await app.env.DB.prepare("INSERT INTO link_rejections (source_id, target_id, link_type, created_at) VALUES (?, ?, 'about', ?)").bind(ids.capture, ids.explicit, app.clock.t).run();
   await app.env.DB.batch([
     app.env.DB.prepare("INSERT INTO memory_keys (memory_id, key_type, position, text, vector_id, created_at) VALUES (?, 'question', 0, 'What is the first question?', 'x:question:0', ?)").bind(ids.explicit, app.clock.t),
     app.env.DB.prepare("INSERT INTO memory_keys (memory_id, key_type, position, text, vector_id, created_at) VALUES (?, 'question', 1, 'What is the second question?', NULL, ?)").bind(ids.explicit, app.clock.t),

@@ -10,7 +10,7 @@ const tables = (db) => db.sqlite.prepare("SELECT name FROM sqlite_master WHERE t
 
 test("migrations create every v2 table", async () => {
   const db = await migratedDb();
-  const want = ["audit", "capsule_cache", "counters", "devices", "links", "memories", "memory_fts", "memory_keys", "memory_tags", "memory_versions", "meta", "recall_log", "runs", "write_counter"];
+  const want = ["audit", "capsule_cache", "counters", "devices", "link_rejections", "links", "memories", "memory_fts", "memory_keys", "memory_tags", "memory_versions", "meta", "recall_log", "runs", "write_counter"];
   assert.deepEqual(tables(db), want);
 });
 
@@ -20,6 +20,17 @@ test("the migrations build the same schema as db/schema.sql", async () => {
   direct.exec(readFileSync(new URL("../db/schema.sql", import.meta.url), "utf8"));
   const dump = (s) => s.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name").all().map((r) => `${r.type} ${r.name} ${r.sql}`);
   assert.deepEqual(dump(db.sqlite), dump(direct));
+});
+
+test("migration 0005 makes the links that already exist the user's, with no confidence", async () => {
+  const db = new FakeD1();
+  const upto = (n) => listMigrations().filter((m) => m.version <= n).map((m) => m.sql).join("\n");
+  await db.exec(upto(4));
+  await db.exec("INSERT INTO memories (id, content, content_hash, origin, valid_from, created_at, updated_at) VALUES ('a', 'a', 'h', 'explicit', 1, 1, 1), ('b', 'b', 'h', 'explicit', 1, 1, 1)");
+  await db.exec("INSERT INTO links (source_id, target_id, link_type, created_at) VALUES ('a', 'b', 'related_to', 1)");
+  await db.exec(listMigrations().find((m) => m.version === 5).sql);
+  assert.deepEqual({ ...(await db.prepare("SELECT made_by, confidence FROM links").first()) }, { made_by: "user", confidence: null });
+  await assert.rejects(db.exec("INSERT INTO links (source_id, target_id, link_type, created_at, made_by) VALUES ('b', 'a', 'related', 1, 'robot')"), /CHECK/);
 });
 
 test("migrate records the version and a second run does nothing", async () => {

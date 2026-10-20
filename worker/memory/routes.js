@@ -3,7 +3,7 @@ import { cleanLabel } from "../audit.js";
 import { badRequest, flag, forbidden, HttpError, intParam, json, notFound, readJson } from "../http.js";
 import { indexMemories } from "../search/indexer.js";
 import { REASONS, screenExplicit } from "../write/screen.js";
-import { adminHeld, adminOnlyMessage, adminOnlyTags, normalizeTags, STATUSES, TYPES } from "./parse.js";
+import { adminHeld, adminOnlyMessage, adminOnlyTags, LINK_TYPES, normalizeTags, RESERVED_LINK_TYPES, STATUSES, TYPES } from "./parse.js";
 import { createStore, ORIGINS, SORTS } from "./store.js";
 
 const MAX_INT = Number.MAX_SAFE_INTEGER;
@@ -163,12 +163,40 @@ export async function history({ env, url, now, memoryIds }) {
   return json({ ok: true, id, versions });
 }
 
-/** POST /link {source_id, target_id, type} */
+/** POST /link {source_id, target_id, type}. The type is one of LINK_TYPES, and the two the system writes are refused. */
 export async function link({ request, env, now, maxBody, memoryIds }) {
   const body = await readJson(request, maxBody);
   const source = idOf(body.source_id);
   const target = idOf(body.target_id);
   memoryIds.push(source, target);
-  const { created } = await createStore(env.DB, now).link(source, target, body.type);
+  const type = typeof body.type === "string" ? body.type.trim().toLowerCase() : body.type;
+  if (!LINK_TYPES.includes(type)) throw badRequest(`type must be one of ${LINK_TYPES.join(", ")}.`, "bad_link_type");
+  if (RESERVED_LINK_TYPES.includes(type)) throw badRequest(`${type} is written by the system only. Use one of ${LINK_TYPES.filter((t) => !RESERVED_LINK_TYPES.includes(t)).join(", ")}.`, "reserved_link_type");
+  const { created } = await createStore(env.DB, now).link(source, target, type);
   return json({ ok: true, created });
+}
+
+/**
+ * POST /unlink {source_id, target_id, type}. A device token may not touch a link whose end holds capsule tags or the canonical
+ * status, and may remove only links a user made. A link the system made is remembered as rejected, so the system never remakes it.
+ */
+export async function unlink(c) {
+  const { request, env, now, maxBody, memoryIds, actor } = c;
+  const body = await readJson(request, maxBody);
+  const source = idOf(body.source_id);
+  const target = idOf(body.target_id);
+  memoryIds.push(source, target);
+  await guardDevice(c, source);
+  await guardDevice(c, target);
+  const { removed } = await createStore(env.DB, now).unlink(source, target, body.type, { userOnly: actor.kind === "device" });
+  return json({ ok: true, removed });
+}
+
+/** GET /links?id= */
+export async function getLinks({ env, url, now, memoryIds }) {
+  const id = idOf(url.searchParams.get("id"));
+  const links = await createStore(env.DB, now).links(id);
+  if (!links) throw notFound("No memory with that id.");
+  memoryIds.push(id);
+  return json({ ok: true, id, links });
 }

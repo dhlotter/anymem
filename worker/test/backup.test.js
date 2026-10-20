@@ -39,7 +39,12 @@ test("GET /export returns format 2 with every row, byte exact, the trash include
   assert.equal(doc.entries.find((e) => e.id === ids.capture).probation_until > START, true);
   assert.equal(doc.versions.filter((v) => v.memory_id === ids.updated).length, 2);
   assert.deepEqual(doc.questions.map((q) => q.position), [0, 1]);
-  assert.equal(doc.links.length, 2);
+  assert.equal(doc.links.length, 3);
+  const system = doc.links.find((l) => l.made_by === "system");
+  assert.deepEqual([system.link_type, system.confidence], ["affects", 0.85]);
+  assert.deepEqual(doc.links.filter((l) => l.made_by === "user").map((l) => l.confidence), [null, null]);
+  assert.deepEqual(doc.link_rejections, (await rows(app, "SELECT * FROM link_rejections")).map((r) => ({ ...r })));
+  assert.deepEqual([doc.link_rejections[0].source_id, doc.link_rejections[0].link_type], [ids.capture, "about"]);
   assert.equal(doc.devices.length, 2);
   for (const d of doc.devices) assert.match(d.token_hash, /^[0-9a-f]{64}$/);
   assert.ok(doc.devices.some((d) => d.revoked_at !== null));
@@ -72,7 +77,7 @@ test("GET /export pages by cursor and limit, and the links and devices come with
   }
   assert.deepEqual(pages.map((p) => p.entries.length), [3, 3, 2]);
   assert.deepEqual(pages.map((p) => p.next_cursor === null), [false, false, true]);
-  assert.deepEqual(pages.map((p) => p.links.length), [0, 0, 2]);
+  assert.deepEqual(pages.map((p) => p.links.length), [0, 0, 3]);
   assert.deepEqual(pages.map((p) => p.devices.length), [0, 0, 2]);
   assert.deepEqual(pages.flatMap((p) => p.entries), full.entries);
   const byKey = (a, b) => (a.memory_id + a.seq < b.memory_id + b.seq ? -1 : 1);
@@ -123,7 +128,7 @@ test("an export imports into a fresh store and every row matches, field by field
   assert.equal(replies.reduce((n, r) => n + r.imported, 0), 8);
   const [a, b] = [await dump(source), await dump(fresh)];
   for (const table of Object.keys(a)) assert.deepEqual(b[table], a[table], table);
-  assert.ok(a.memories.length === 8 && a.versions.length >= 4 && a.links.length === 2 && a.devices.length === 2 && a.questions.length === 2 && a.tags.length > 4);
+  assert.ok(a.memories.length === 8 && a.versions.length >= 4 && a.links.length === 3 && a.link_rejections.length === 1 && a.devices.length === 2 && a.questions.length === 2 && a.tags.length > 4);
   // the trash and the closed memory kept their times and pointers
   assert.ok(b.memories.some((m) => m.deleted_at !== null));
   assert.ok(b.memories.some((m) => m.valid_until !== null && m.superseded_by !== null));
@@ -136,7 +141,7 @@ test("importing page by page gives the same result as one call", async () => {
   const fresh = await createApp();
   const replies = await restore(fresh, named(doc), 3);
   assert.deepEqual(replies.map((r) => [r.imported, r.next_offset, r.remaining]), [[3, 3, 5], [3, 6, 2], [2, 8, 0]]);
-  assert.deepEqual(replies.map((r) => [r.links, r.devices]), [[0, 0], [0, 0], [2, 2]], "links and devices go in with the last page");
+  assert.deepEqual(replies.map((r) => [r.links, r.devices]), [[0, 0], [0, 0], [3, 2]], "links and devices go in with the last page");
   assert.deepEqual(await dump(fresh), await dump(source));
 });
 
@@ -277,6 +282,28 @@ test("links between memories that do not exist are dropped, and bad documents ar
   assert.equal((await post({ format: 2, entries: [], links: [{ source_id: 1 }] })).status, 400);
   assert.equal((await post({ format: 2, entries: [], limit: 0 })).status, 400);
   assert.equal((await post({ format: 2, entries: [], offset: -1 })).status, 400);
+});
+
+test("a backup from before link provenance imports with the defaults, and the new fields are checked", async () => {
+  const app = await createApp();
+  const mk = (id) => ({ id, content: `text ${id}`, content_hash: id, origin: "import", valid_from: 1, created_at: 1, updated_at: 1, tags: [] });
+  const old = { format: 2, entries: [mk("m1"), mk("m2")], links: [{ source_id: "m1", target_id: "m2", link_type: "related", created_at: 5 }] };
+  const [reply] = await restore(app, old);
+  assert.deepEqual([reply.links, reply.link_rejections], [1, 0]);
+  assert.deepEqual((await rows(app, "SELECT made_by, confidence FROM links")).map((r) => ({ ...r })), [{ made_by: "user", confidence: null }]);
+
+  const fresh = await createApp();
+  const links = [{ source_id: "m1", target_id: "m2", link_type: "affects", created_at: 6, made_by: "system", confidence: 0.6 }];
+  const rejections = [{ source_id: "m2", target_id: "m1", link_type: "about", created_at: 7 }, { source_id: "m2", target_id: "ghost", link_type: "about", created_at: 7 }];
+  const [two] = await restore(fresh, { format: 2, entries: [mk("m1"), mk("m2")], links, link_rejections: rejections });
+  assert.deepEqual([two.links, two.link_rejections], [1, 1], "a rejection of a memory that does not exist is dropped");
+  assert.deepEqual((await rows(fresh, "SELECT made_by, confidence FROM links")).map((r) => ({ ...r })), [{ made_by: "system", confidence: 0.6 }]);
+
+  const post = (body) => fresh.call("/import", { method: "POST", body: { format: 2, entries: [], ...body } });
+  assert.equal((await post({ links: [{ ...links[0], made_by: "robot" }] })).status, 400);
+  assert.equal((await post({ links: [{ ...links[0], confidence: "high" }] })).status, 400);
+  assert.equal((await post({ link_rejections: [{ source_id: "m1" }] })).status, 400);
+  assert.equal((await post({ link_rejections: "x" })).status, 400);
 });
 
 test("import is admin only", async () => {
