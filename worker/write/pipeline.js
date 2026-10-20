@@ -113,8 +113,13 @@ async function run({ env, ctx, now, actorId, actorKind, memoryIds }, w, counters
     memoryIds.push(found.id);
     return { status: 200, body: { ok: true, duplicate: true, matchId: found.id } };
   };
+  // An exact copy of a memory the writer may not see is not a duplicate for this writer, so a capture cannot tell whether a hidden memory has this text.
+  let allowDuplicate = false;
   const dup = await exact();
-  if (dup) return duplicate(dup);
+  if (dup) {
+    if (await hides(dup.id)) allowDuplicate = true;
+    else return duplicate(dup);
+  }
 
   // 5. Only a memory of the same project is updated. An update also sets the project from the write's tags, so a memory of
   // another project (or a global one, for a project write) would move.
@@ -144,21 +149,22 @@ async function run({ env, ctx, now, actorId, actorKind, memoryIds }, w, counters
   }
   const hidden = await hiddenIds(env.DB, neighbours.map((n) => n.id), actor);
   const nearest = neighbours[0];
-  if (nearest && nearest.similarity >= REFUSE_SIMILARITY) {
+  if (nearest && nearest.similarity >= REFUSE_SIMILARITY && !hidden.has(nearest.id)) {
     counters.bump("capture.rejected.near_duplicate");
-    if (hidden.has(nearest.id)) return { status: 200, body: { ok: true, duplicate: true } };
     memoryIds.push(nearest.id);
     return { status: 200, body: { ok: true, duplicate: true, matchId: nearest.id, score: round4(nearest.similarity) } };
   }
-  // The warning and the contradiction check only look at memories the writer may see.
-  if (hidden.size) neighbours = neighbours.filter((n) => !hidden.has(n.id));
+  // The warning and the contradiction check only look at memories the writer may see, and never at a subject card, which a
+  // contradiction would close.
+  const cards = neighbours.length ? new Set((await env.DB.prepare("SELECT id FROM subjects WHERE id IN (SELECT value FROM json_each(?))").bind(JSON.stringify(neighbours.map((n) => n.id))).all()).results.map((r) => r.id)) : new Set();
+  if (hidden.size || cards.size) neighbours = neighbours.filter((n) => !hidden.has(n.id) && !cards.has(n.id));
   const top = neighbours[0];
   const decision = await judgeConflict(env, parsed.content, neighbours, counters);
 
   // 9
   const entry = await store.create(
     { ...parsed, origin: w.origin, harness: w.harness, session: w.session, probation_until: isCapture ? now() + PROBATION_MS : null },
-    { unlessLiveDuplicate: true },
+    { unlessLiveDuplicate: !allowDuplicate },
   );
   if (!entry) {
     // A racing write of the same text landed between the check and the insert.

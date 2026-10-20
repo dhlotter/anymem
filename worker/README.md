@@ -102,7 +102,8 @@ Every route needs the Access JWT (unless `REQUIRE_ACCESS` is false) and then a b
 | `POST /admin/run-maintenance` | admin | run the nightly job now, optionally `{steps, wall_ms, subrequests}` |
 | `POST /vectorize-probe`, `GET /vectorize-probe?probe=` | any | the doctor's vector probe |
 | `GET /ui/api/overview`, `/ui/api/home`, `/ui/api/growth`, `/ui/api/recalls`, `/ui/api/probation`, `/ui/api/activity`, `/ui/api/runs`, `/ui/api/usage`, `/ui/api/audit-facets`, `/ui/api/harnesses` | admin, browser | read routes for the dashboard screens, they write nothing but the audit row |
-| `GET /ui/api/people`, `/ui/api/token-expiry`, `/ui/api/memory-extras` | any, browser | read routes for the dashboard |
+| `GET /ui/api/token-expiry`, `/ui/api/memory-extras` | any, browser | read routes for the dashboard |
+| `GET /ui/api/people` | admin, browser | the profile and person memories for the dashboard |
 | `GET /`, `GET /ui/*` | browser login only | the dashboard files |
 
 ### Recall

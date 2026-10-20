@@ -38,7 +38,7 @@ function oneOf(value, allowed, name) {
 async function guardDevice({ env, now, actor }, id, { undo = false } = {}) {
   if (actor.kind !== "device") return;
   // A memory the device may not see is a 404 here, the same as a missing id, so a write cannot be used to probe or to change it.
-  if (!(await canSee(env.DB, id, actor))) throw notFound("No memory with that id.");
+  if (!(await canSee(env.DB, id, actor)) || !(await createStore(env.DB, now).get(id, { trash: true }))) throw notFound("No memory with that id.");
   // A subject's card is shaped by the person or the dashboard, never by a device, and a link from a device could move a memory in or out of a private subject.
   if (await env.DB.prepare("SELECT 1 AS n FROM subjects WHERE id = ?").bind(id).first()) throw forbidden("A device token cannot change a subject card or link to one. Only the admin token or a browser login can.", "admin_only");
   const store = createStore(env.DB, now);
@@ -96,6 +96,12 @@ export async function listEntries({ env, url, now, memoryIds, actor }) {
     cursor: p.get("cursor") || undefined,
     hideFrom: actor.kind === "device" ? actor.id : undefined,
   });
+  // A trashed memory a hidden one replaced does not name it.
+  const replacers = result.entries.map((e) => e.superseded_by).filter(Boolean);
+  if (replacers.length) {
+    const hidden = await hiddenIds(env.DB, replacers, actor);
+    if (hidden.size) for (const e of result.entries) if (hidden.has(e.superseded_by)) e.superseded_by = null;
+  }
   memoryIds.push(...result.entries.map((e) => e.id));
   return json({ ok: true, ...result });
 }
@@ -110,8 +116,8 @@ export async function update(c) {
   if (body.if_updated_at !== undefined && !Number.isSafeInteger(body.if_updated_at)) throw badRequest("if_updated_at must be a whole number of milliseconds.");
   const restricted = actor.kind === "device" ? adminOnlyTags(normalizeTags(body.tags)) : [];
   if (restricted.length) throw forbidden(adminOnlyMessage(restricted), "admin_only");
-  await guardDevice(c, id);
   if (typeof body.content === "string") refuseSecret(body.content);
+  await guardDevice(c, id);
   memoryIds.push(id);
   const entry = await createStore(env.DB, now).update({ id, content: body.content, tags: body.tags === undefined ? undefined : normalizeTags(body.tags), ifUpdatedAt: body.if_updated_at });
   indexLater(c, id);
@@ -123,8 +129,8 @@ export async function append(c) {
   const { request, env, now, maxBody, memoryIds } = c;
   const body = await readJson(request, maxBody);
   const id = idOf(body.id);
-  await guardDevice(c, id);
   if (typeof body.addition === "string") refuseSecret(body.addition);
+  await guardDevice(c, id);
   memoryIds.push(id);
   const entry = await createStore(env.DB, now).append(id, body.addition);
   indexLater(c, id);
