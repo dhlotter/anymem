@@ -3,6 +3,7 @@ import { createWorker } from "../../index.js";
 import { createKeyCache } from "../../auth.js";
 import { migrate, listMigrations } from "../../migrate.js";
 import { FakeD1 } from "./d1.js";
+import { ensureSubjectsSchema } from "./subjects-schema.js";
 import { FakeAI, FakeR2, FakeVectorize } from "./fakes.js";
 import { AUD, SERVICE_NAME, TEAM, browserClaims, certsFetch, createIssuer, serviceClaims } from "./jwt.js";
 
@@ -31,7 +32,7 @@ export async function createApp({ env: envOver = {}, withAccess = true } = {}) {
   const fetchFn = certsFetch([issuer]);
   const worker = createWorker({ fetch: fetchFn, now: () => clock.t, cache: createKeyCache() });
   const env = {
-    DB: await migratedDb(),
+    DB: await ensureSubjectsSchema(await migratedDb()),
     VECTORIZE: new FakeVectorize(),
     AI: new FakeAI(),
     BACKUP_BUCKET: new FakeR2(),
