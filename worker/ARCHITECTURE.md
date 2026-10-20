@@ -24,6 +24,7 @@ Version 2.0.5. This file says how the Worker is built and why. The routes and se
 | `search/recall.js`, `search/routes.js` | The recall pipeline and `GET /recall`. |
 | `search/relevance.js` | Decides `relevant` per hit. |
 | `search/questions.js` | Likely questions per memory from `granite-4.0-h-micro` in JSON mode. |
+| `subjects/private.js` | The private rule: `hiddenIds`, `canSee` and `visibleOnly`. The one place it lives, see "The private rule" below. |
 | `admin/routes.js`, `admin/legacy.js` | `POST /admin/reindex`, `POST /admin/questions`, `POST /admin/harness`, `POST /import` and the old export mapping. |
 | `write/pipeline.js` | The write pipeline behind `POST /capture`. Every step in order, see "The write pipeline" below. |
 | `write/route.js` | The `POST /capture` handler. Reads the request, maps source to origin, calls the pipeline. |
@@ -276,6 +277,14 @@ rows older than 90 days.
 6. `/link` and `/unlink` audit both memory ids, and `/links` the one id. `/unlink` takes a write slot from a device token like `/link` does.
 7. The trash purge deletes the links and the `link_rejections` rows of a purged memory, in both directions.
 
+### The private rule
+
+1. A subject has a scope, `shared` or `private`. A device token whose device has `allow_private = 0` must not see a private subject, its card memory, or a memory whose only `about` links go to private subjects. The admin token, a browser login and a device with `allow_private = 1` see everything.
+2. `subjects/private.js` is the only place that says this. For a memory the rule is: it is the card of a private subject, or it has at least one `about` link to a private subject and no `about` link to a subject that is not private. An `about` link to a memory that is not a subject counts for neither side. The module exports `hiddenIds(db, ids, actor)` (a Set), `canSee(db, id, actor)` and `visibleOnly(db, rows, actor, idOf)`. For pieces of SQL that need the same gate it also exports `SEES_PRIVATE_SQL`, the device flag as an `EXISTS`, which fails closed when the device row cannot be found.
+3. Every call is one query whatever the number of ids, a `json_each` over the ids with the links and subjects read by `EXISTS`. The admin token and a browser login cost no query, and a device costs the one query even when nothing is private.
+4. Where it is applied: `GET /entry` (also an old version, and the trash), `GET /history` and `GET /links` answer 404 for a hidden memory with the text of a missing one, so a device cannot tell the two apart. `GET /links` also drops the links whose other end is hidden, using one check for the memory and all other ends. `GET /list` drops hidden entries after the page is read. `GET /ui/api/memory-extras` does the same as `GET /links` for its links, since they carry the names of the other ends. Recall applies it to its candidates before ranking, and to the subject cards. The subject routes call the same exports for the subject lists and the 404 on a private subject. The actor comes from the route's `actor`. A call to `recall()` with no actor hides nothing, which is how the nightly job and tests call it.
+5. Not covered: `POST /capture` can still say `matchId` of a hidden memory when a device writes a near duplicate, and a device can still write to a hidden memory whose id it knows (the write routes do not ask the rule). `GET /ui/api/people` lists person memories without asking it either. None of these returns the content of a hidden memory, apart from `/ui/api/people` in the unlikely case that a person memory is about a private subject only.
+
 ## Reply shapes
 
 Errors are `{error, code}`. Replies below all carry `ok: true`.
@@ -365,13 +374,16 @@ minute lag.
    with a keyword rank of 2 or better, matched a word of rarity 5 or more that sits inside a name shaped token of the prompt (a
    digit, underscore, hyphen or dot inside, camel case, or a capital after the first word) and covers 60 percent of the idf of all
    the query words (the lookup rule, for identifiers such as R84 or TOP-123). A failed reranker leaves the other rules in charge.
-8. Reply: `{ok, query, results}`. A result has `id, name, description, type, content (whole), tags, project, origin, harness, harness_label, status,
+8. Reply: `{ok, query, results}` and, with the `SUBJECTS` variable set to `on`, `subjects` (see step 11). A result has `id, name, description, type, content (whole), tags, project, origin, harness, harness_label, status,
    created_at, updated_at, score, similarity, rerank (when scored), relevant`, and with `explain=1` `why {dense_score,
    dense_rank, keyword_rank, coverage, query_words, keyword_terms [{term, level, idf}]}` plus `took_ms` and `timings` (ms, embed, vectorize and keyword are since the
    start, load and rerank are the step itself). `degraded: "vector"` marks a reply made without the vector search.
 9. `recall_count` and `last_recalled_at` change only with `count=1`. Only hits marked relevant are counted, and each one also gets a `recall_log` row with the time and the harness of the caller (see "Counters" below), written in its own statement so a failure there never undoes the count. A plain recall writes nothing but its audit row, which lists the
    returned ids. Query parameters are `query, topK (1 to 50, default 5), scope, exclude_ids, tag, kind, type, origin, after,
-   before, min_recalls, as_of, capsule, explain, count`. `synthesize` is ignored.
+   before, min_recalls, as_of, capsule, explain, count, subject`. `synthesize` is ignored.
+10. The private rule runs on the rows the filter step loaded, before ranking, so the cut to `topK`, the order and every relevance check see only what the caller may see. A recall by a device without private access ranks the same as one by the admin token over the visible memories, and a page is still full.
+11. With `SUBJECTS` set to `on`, one query after ranking finds the cards of the relevant results: `about` links from those results to a subject with status `active` or `stale` whose card memory is live, and for a device without private access only a shared subject. The best ranked result's subject comes first, then the one with more `via` results, and two at most are returned. A reply with no cards has `subjects: []`. The reply never has the key when the variable is off or unset. This is the only place recall reads the `subjects` table.
+12. `GET /recall?subject=SLUG` skips search. It reads the card by slug (one query, the private rule in its SQL) and the live members newest updated first, capped by `topK` (a second query), then the text and tags of those members like a recall does. It is not ranked, not counted and takes no part in `recall_log`. Private members need no filter of their own: a member of a visible subject has an `about` link to a subject the caller sees, so the rule never hides it. A subject the caller may not see is 404, like a missing slug.
 
 ### Import and reindex
 
