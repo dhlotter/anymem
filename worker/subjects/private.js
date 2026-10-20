@@ -13,8 +13,16 @@ export const mayBeRestricted = (actor) => actor?.kind === "device";
 export const SEES_PRIVATE_SQL = "EXISTS (SELECT 1 FROM devices WHERE id = ? AND allow_private = 1)";
 
 // The memory is the card of a private subject, or it has an about link to a private subject and none to a shared one.
-const ABOUT = (scope) => `EXISTS (SELECT 1 FROM links l JOIN subjects s ON s.id = l.target_id WHERE l.source_id = j.value AND l.link_type = 'about' AND s.scope ${scope})`;
-const HIDDEN_SQL = `SELECT j.value AS id FROM json_each(?) j WHERE NOT ${SEES_PRIVATE_SQL} AND (EXISTS (SELECT 1 FROM subjects c WHERE c.id = j.value AND c.scope = 'private') OR (${ABOUT("= 'private'")} AND NOT ${ABOUT("<> 'private'")}))`;
+const ABOUT = (col, scope) => `EXISTS (SELECT 1 FROM links l JOIN subjects s ON s.id = l.target_id WHERE l.source_id = ${col} AND l.link_type = 'about' AND s.scope ${scope})`;
+const HIDDEN_FOR = (col) => `NOT ${SEES_PRIVATE_SQL} AND (EXISTS (SELECT 1 FROM subjects c WHERE c.id = ${col} AND c.scope = 'private') OR (${ABOUT(col, "= 'private'")} AND NOT ${ABOUT(col, "<> 'private'")}))`;
+const HIDDEN_SQL = `SELECT j.value AS id FROM json_each(?) j WHERE ${HIDDEN_FOR("j.value")}`;
+
+/**
+ * SQL that is true for a row the device may not see, for paging in SQL so a page and its cursor never name a hidden row.
+ * Bind the device id once. Use it only for a device actor.
+ * @param {string} col the column that holds the memory id
+ */
+export const hiddenWhere = (col) => `(${HIDDEN_FOR(col)})`;
 
 /**
  * The ids the actor may not see.

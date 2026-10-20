@@ -211,7 +211,7 @@ export function createSubjectStore(db, now = Date.now) {
       for (const [column, value] of [["kind", kind], ["status", status], ["scope", scope]]) {
         if (value) (where.push(`s.${column} = ?`), args.push(value));
       }
-      const { results } = await db.prepare(`SELECT ${PICK} FROM subjects s JOIN memories m ON m.id = s.id WHERE ${where.join(" AND ")} ORDER BY s.updated_at DESC, s.id DESC`).bind(...args).all();
+      const { results } = await db.prepare(`SELECT ${PICK} FROM subjects s JOIN memories m ON m.id = s.id WHERE ${where.join(" AND ")} ORDER BY s.updated_at DESC, s.id DESC LIMIT 1000`).bind(...args).all();
       const needle = q?.trim().toLowerCase();
       const rows = needle ? results.filter((r) => [r.slug, nameOf(r), ...JSON.parse(r.aliases)].some((t) => t.toLowerCase().includes(needle))) : results;
       const n = await counts(rows.map((r) => r.id));

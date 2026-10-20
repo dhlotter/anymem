@@ -70,7 +70,7 @@ const ROUTES = [
   { method: "GET", path: "/vectorize-probe", handler: readProbe },
   { method: "GET", path: "/prompt-capsules/core", browser: true, handler: capsuleRoute },
   { method: "GET", path: "/ui/api/overview", admin: true, browser: true, handler: overview },
-  { method: "GET", path: "/ui/api/people", browser: true, handler: people },
+  { method: "GET", path: "/ui/api/people", admin: true, browser: true, handler: people },
   { method: "GET", path: "/ui/api/token-expiry", browser: true, handler: tokenExpiry },
   { method: "GET", path: "/ui/api/memory-extras", browser: true, handler: memoryExtras },
   { method: "GET", path: "/ui/api/home", admin: true, browser: true, handler: home },

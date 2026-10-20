@@ -8,7 +8,8 @@ Subjects, made by hand. A subject is a thing memories are about, a person, a pet
 2. **Private subjects.** A subject can be private. A device token whose device has `allow_private` off never sees a private subject, its card, or a memory whose only `about` links go to private subjects, on recall, list, entry, history and links. `devices.py allow-private ID on|off` sets the flag, and it is yours to run, not the agent's.
 3. **Recall.** With the Worker setting `SUBJECTS` on, a recall that finds a relevant memory of a subject also returns its card, and the hook prints it above the memories. `GET /recall?subject=SLUG` lists a subject's members. With `SUBJECTS` off, which is the default, nothing about recall changes.
 4. **Dashboard.** A Subjects screen with a table, a card drawer, a New subject form, and a Subjects row on the memory drawer.
-5. **Backup.** Export and import carry subjects and each device's `allow_private`. A script, `scripts/subjects-from-people.mjs`, turns the saved people memories into person subjects (a dry run unless you pass `--apply`).
+5. **Hardened by an independent review.** A device token cannot write to a memory it may not see, change a subject card, or link to one. A capture from a device cannot probe a hidden memory. The list, the count and the people list leave hidden memories out for a device, and the trash purge keeps the card of a private subject that still has members.
+6. **Backup.** Export and import carry subjects and each device's `allow_private`. A script, `scripts/subjects-from-people.mjs`, turns the saved people memories into person subjects (a dry run unless you pass `--apply`).
 
 ## [2.0.5] 2026-10-20
 

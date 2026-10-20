@@ -14,7 +14,8 @@ function indexLater({ env, ctx, now }, id) {
 /** The secret screen every explicit write gets. It covers the brief and every field value, because both reach a prompt. */
 function refuseSecret(body) {
   const values = body.fields && typeof body.fields === "object" ? Object.values(body.fields).filter((v) => typeof v === "string") : [];
-  const screened = screenExplicit([typeof body.brief === "string" ? body.brief : "", ...values].join("\n"));
+  const names = [typeof body.name === "string" ? body.name : "", ...(Array.isArray(body.aliases) ? body.aliases.filter((a) => typeof a === "string") : [])];
+  const screened = screenExplicit([typeof body.brief === "string" ? body.brief : "", ...names, ...values].join("\n"));
   if (!screened.ok) throw new HttpError(422, "refused", REASONS[screened.reason]);
 }
 

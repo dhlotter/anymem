@@ -2,7 +2,7 @@
 import { cleanLabel } from "../audit.js";
 import { badRequest, flag, forbidden, HttpError, intParam, json, notFound, readJson } from "../http.js";
 import { indexMemories } from "../search/indexer.js";
-import { canSee, hiddenIds, visibleOnly } from "../subjects/private.js";
+import { canSee, hiddenIds } from "../subjects/private.js";
 import { REASONS, screenExplicit } from "../write/screen.js";
 import { adminHeld, adminOnlyMessage, adminOnlyTags, LINK_TYPES, normalizeTags, RESERVED_LINK_TYPES, STATUSES, TYPES } from "./parse.js";
 import { createStore, ORIGINS, SORTS } from "./store.js";
@@ -37,6 +37,10 @@ function oneOf(value, allowed, name) {
  */
 async function guardDevice({ env, now, actor }, id, { undo = false } = {}) {
   if (actor.kind !== "device") return;
+  // A memory the device may not see is a 404 here, the same as a missing id, so a write cannot be used to probe or to change it.
+  if (!(await canSee(env.DB, id, actor))) throw notFound("No memory with that id.");
+  // A subject's card is shaped by the person or the dashboard, never by a device, and a link from a device could move a memory in or out of a private subject.
+  if (await env.DB.prepare("SELECT 1 AS n FROM subjects WHERE id = ?").bind(id).first()) throw forbidden("A device token cannot change a subject card or link to one. Only the admin token or a browser login can.", "admin_only");
   const store = createStore(env.DB, now);
   let restricted = [];
   const cur = await store.get(id, { trash: true });
@@ -59,6 +63,8 @@ export async function getEntry({ env, url, now, memoryIds, actor }) {
   // A memory the device may not see is a 404, the same as one that does not exist.
   if (!entry || !(await canSee(env.DB, id, actor))) throw notFound(version === undefined ? "No memory with that id." : "No such memory or version.");
   memoryIds.push(id);
+  // The id of a hidden memory that replaced this one is not shown either.
+  if (entry.superseded_by && (await hiddenIds(env.DB, [entry.superseded_by], actor)).has(entry.superseded_by)) entry.superseded_by = null;
   return json({ ok: true, entry });
 }
 
@@ -88,9 +94,8 @@ export async function listEntries({ env, url, now, memoryIds, actor }) {
     sort: oneOf(p.get("sort"), Object.keys(SORTS), "sort"),
     n,
     cursor: p.get("cursor") || undefined,
+    hideFrom: actor.kind === "device" ? actor.id : undefined,
   });
-  // The page is cut after it is read, so a device without private access can get a short page and still a cursor.
-  result.entries = await visibleOnly(env.DB, result.entries, actor);
   memoryIds.push(...result.entries.map((e) => e.id));
   return json({ ok: true, ...result });
 }

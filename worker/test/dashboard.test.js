@@ -209,7 +209,7 @@ test("the dashboard read routes need a login, and overview is admin only", async
     assert.equal((await raw(app, path, { jwt: app.serviceJwt(), token: ADMIN_TOKEN })).status !== 401, true, path);
   }
   assert.equal((await raw(app, "/ui/api/overview", { jwt: app.serviceJwt(), token })).status, 403);
-  assert.equal((await raw(app, "/ui/api/people", { jwt: app.serviceJwt(), token })).status, 200);
+  assert.equal((await raw(app, "/ui/api/people", { jwt: app.serviceJwt(), token })).status, 403, "people holds profile and person memories a private subject may cover");
 });
 
 test("wrangler.jsonc serves the ui folder through the assets binding with the Worker in front, and dev files stay out of it", () => {

@@ -253,6 +253,7 @@ export async function recallSubject(env, { slug, topK, actor }) {
     .prepare("SELECT m.id, m.name, m.description, m.type, m.status, m.origin, m.harness, m.project, m.created_at, m.updated_at FROM memories m WHERE m.deleted_at IS NULL AND m.valid_until IS NULL AND m.status <> 'pending' AND m.id IN (SELECT source_id FROM links WHERE target_id = ? AND link_type = 'about') ORDER BY m.updated_at DESC, m.id DESC LIMIT ?")
     .bind(card.id, Math.min(topK ?? DEFAULT_TOP_K, MAX_TOP_K))
     .all();
-  const full = await loadFull(env.DB, rows.map((r) => r.id));
-  return { subject: subjectOf(card), results: rows.map((row) => entryOf(row, full)) };
+  const visible = await visibleOnly(env.DB, rows, actor);
+  const full = await loadFull(env.DB, visible.map((r) => r.id));
+  return { subject: subjectOf(card), results: visible.map((row) => entryOf(row, full)) };
 }

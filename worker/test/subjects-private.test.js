@@ -141,10 +141,11 @@ test("each wired read costs a device one query more than the admin token and doe
   };
   // What a device costs over the admin token on a route that does not use the rule: its token lookup.
   const overhead = (await cost("/count", closed)) - (await cost("/count"));
-  const paths = [`/entry?id=${w.plain}`, `/history?id=${w.plain}`, `/links?id=${w.cottage}`, "/list?n=50"];
-  for (const path of paths) assert.equal((await cost(path, closed)) - (await cost(path)), overhead + 1, path);
+  // The list pages past hidden rows inside its own query, so it costs a device nothing extra.
+  const paths = [[`/entry?id=${w.plain}`, 1], [`/history?id=${w.plain}`, 1], [`/links?id=${w.cottage}`, 1], ["/list?n=50", 0]];
+  for (const [path, extra] of paths) assert.equal((await cost(path, closed)) - (await cost(path)), overhead + extra, path);
   for (let i = 0; i < 30; i++) await app.call("/capture", { method: "POST", body: { content: `Extra note number ${i} about nothing` } });
-  for (const path of paths) assert.equal((await cost(path, closed)) - (await cost(path)), overhead + 1, `${path} with more rows`);
+  for (const [path, extra] of paths) assert.equal((await cost(path, closed)) - (await cost(path)), overhead + extra, `${path} with more rows`);
 });
 
 test("GET /ui/api/memory-extras: a hidden memory is a 404, and the names of hidden ends are left out of the links", async () => {
