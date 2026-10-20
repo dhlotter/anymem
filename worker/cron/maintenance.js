@@ -6,7 +6,7 @@
 import { tokenExpiryInfo } from "../dashboard-api.js";
 import { HttpError, badRequest, json, readJson } from "../http.js";
 import { runBackup } from "../backup/backup.js";
-import { createBudget, countedEnv, DEFAULT_SUBREQUESTS, DEFAULT_WALL_MS } from "./budget.js";
+import { createBudget, countedEnv, nightlyLimits } from "./budget.js";
 import { classifyStep, reindexStep } from "./indexing.js";
 import { mergeDuplicates } from "./merge.js";
 import { runProbation } from "./probation.js";
@@ -54,7 +54,7 @@ export const STEPS = {
  * @param {{steps?: string[], wallMs?: number, subrequests?: number, job?: string, graceMs?: number}} [opts] subrequests is the budget of the whole run, graceMs is for tests
  * @returns {Promise<{ok: boolean, summary: Record<string, any>}>}
  */
-export async function runMaintenance(env, now, { steps = Object.keys(STEPS), wallMs = DEFAULT_WALL_MS, subrequests = DEFAULT_SUBREQUESTS, job = "nightly", graceMs = GRACE_MS } = {}) {
+export async function runMaintenance(env, now, { steps = Object.keys(STEPS), wallMs = nightlyLimits(env).wallMs, subrequests = nightlyLimits(env).subrequests, job = "nightly", graceMs = GRACE_MS } = {}) {
   const started = await env.DB.prepare("INSERT INTO runs (job, started_at) VALUES (?, ?)").bind(job, now()).run();
   const runId = started.meta.last_row_id;
   const summary = {};
