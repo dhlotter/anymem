@@ -20,6 +20,7 @@ Output goes to standard out and one line of trouble goes to standard error. Exit
 | `append.py`, `update.py`, `status.py` | change a memory |
 | `forget.py`, `restore.py`, `undo.py` | trash, bring back, revert |
 | `link.py`, `unlink.py`, `links.py` | link two memories, remove a link, list a memory's links |
+| `subject.py` | the things memories are about: list, show, add and change subjects |
 | `profile.py`, `person.py` | the person's own facts, and the people they talk about |
 | `usage.py` | what memory adds to prompts |
 | `backup.py` | a local copy of the store |
@@ -36,7 +37,7 @@ Output goes to standard out and one line of trouble goes to standard error. Exit
 recall.py QUERY [--limit N] [--all] [--json]
 ```
 
-Search, best match first. `--limit` is 1 to 50 and defaults to 5. In a project it sends `scope=project:SLUG`, which the Worker answers with that project plus the global memories. `--all` searches everything. It sends `count=1`, so a recall counts toward probation. A hit the Worker marks not `relevant` prints as `(weak match)`. A `degraded` reply says search was weaker than usual. See [recall](recall.md).
+Search, best match first. `--limit` is 1 to 50 and defaults to 5. In a project it sends `scope=project:SLUG`, which the Worker answers with that project plus the global memories. `--all` searches everything. It sends `count=1`, so a recall counts toward probation. A hit the Worker marks not `relevant` prints as `(weak match)`. A `degraded` reply says search was weaker than usual. When the Worker's reply carries `subjects` (its `SUBJECTS` variable is on), each card prints above the memories as one `<memory>` line, `[card] NAME (KIND)` and then the brief on one line, at most 1200 characters a card and 1800 for all of them, and only when a relevant result it was reached through is in the list. A reply without `subjects` prints exactly the memories. See [recall](recall.md).
 
 ### remember.py
 
@@ -89,6 +90,32 @@ links.py ID [--json]
 
 One line per link, grouped by type: `type  out|in  other_id  other_name`. `out` means this memory is the source, `in` means it is the target. Memories in the trash are not listed. A type outside the list, left by an older version, shows as `related`. `no links` when there are none.
 
+### subject.py
+
+```
+subject.py list [--kind KIND]
+subject.py show SLUG
+subject.py add KIND SLUG NAME [--brief TEXT | --brief-file PATH]
+subject.py set SLUG FIELD VALUE
+subject.py alias SLUG NAME
+subject.py scope SLUG shared|private
+subject.py retire SLUG
+```
+
+A subject is a thing memories are about. Its card is an ordinary memory that holds a short brief, plus a row with a kind, a status, a scope, fields and aliases. The Worker writes the card, so there is no script that writes one by hand. A memory is a member of a subject when a link of type `about` runs from the memory to the card (`link.py MEMORY CARD_ID about`). The kinds are `person`, `pet`, `asset`, `project`, `area` and `topic`.
+
+| Action | Meaning |
+|---|---|
+| `list` | One line per subject: `slug  kind  status  scope  N members  name`. `--kind` filters. `no subjects` when there are none. Retired subjects are listed too |
+| `show SLUG` | The slug, kind, status, scope and name, then the card id, the aliases, one `field: value` line per field, the brief, and the members (memory id and name), newest first |
+| `add KIND SLUG NAME` | Makes an active subject. The slug is 2 to 40 characters, lowercase letters and digits with single dashes. The name is up to 80 characters. The brief comes from `--brief`, or from `--brief-file`, where `-` reads standard input. Text between `<private>` tags is removed, and a brief that looks like it holds a secret is refused (exit 2) before anything is sent |
+| `set SLUG FIELD VALUE` | Sets one field. An empty VALUE removes it. The allowed fields depend on the kind (person: `relationship`, `known_as`, `work`, `contact`, `birthday`. pet: `name`, `species`, `breed`, `born`, `vet`, `status`, `health_note`. asset: `type`, `name`, `identifier`, `acquired`, `status`, `value_note`. project: `what`, `status`, `owner`, `repo`. area: `what`, `status`. topic: `what`). The Worker refuses any other field, and a value is up to 200 characters |
+| `alias SLUG NAME` | Adds another name the subject goes by, stored in lowercase |
+| `scope SLUG shared\|private` | A private subject, its card and the memories only about it are hidden from a device token whose device is set off with `devices.py allow-private`. Only the admin token or a browser login may change a scope |
+| `retire SLUG` | Marks the subject retired. Nothing is deleted |
+
+Only the admin token and a browser login may write a card, so with a device token every change except reading is refused by the Worker with one plain line (exit 1). `list` and `show` work with a device token, and leave out a private subject the device may not see. See [recall](recall.md) for how a card reaches a prompt.
+
 ### backup.py
 
 ```
@@ -113,6 +140,7 @@ Lists, adds and revokes per device tokens. It needs the admin token.
 devices.py list
 devices.py add LABEL [--share]
 devices.py revoke ID
+devices.py allow-private ID on|off
 ```
 
 | Action | Meaning |
@@ -120,6 +148,7 @@ devices.py revoke ID
 | `list` | Every device that is not revoked, with id, label, created and last used |
 | `add LABEL` | Creates a device token and shows it once. The label is at most 64 characters. With `--share` it prints one connection string for `connect.py` on the new machine. Treat it like a password |
 | `revoke ID` | Stops that token at the next request. A unique prefix of the id is enough. The Access pair in the connection strings is shared, so it is not revoked by this (see `setup --rotate-access`) |
+| `allow-private ID on\|off` | Lets a device see private subjects, or keeps them from it. A device starts on. A device set off never sees a private subject, its card, or a memory that is only about private subjects. `list` marks such a device with `private subjects off`. The admin token only, the person runs it and an agent never does |
 
 ### profile.py
 
@@ -176,6 +205,7 @@ One line per check, then a verdict. Exit 0 when no check failed, warnings allowe
 | prerequisites | Python version, whether the `claude` command exists |
 | usage | counts from `GET /stats` (admin token), today's capture numbers and the last nightly job |
 | backup | the latest nightly backup, a warning when it is over 2 days old or the bucket is missing |
+| subjects | `N active, M private` from `GET /subjects`. No line at all when the Worker does not answer that route |
 | vector | with `--probe`, whether a probe vector is found through the metadata filter, waiting up to 3 minutes |
 
 `--json` prints the checks and the verdict as one object. The probe writes one vector and no memory, and waits up to 3 minutes.
