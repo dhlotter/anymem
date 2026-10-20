@@ -12,13 +12,16 @@
 Routes: GET /health, /count, /recall (returns the configured results with a why block), /prompt-capsules/core (the configured
 capsule in the v2 shape the real Worker sends: flat sections with their text; `legacy=True` sends the old shape, a JSON string in
 `text`, to test the fallback), POST /capture (stored in srv.captured, returns an id), POST /extract (returns the configured
-proposals), POST /forget, /status. Any request without an Authorization bearer header gets 401.
+proposals), POST /forget, /status, and the links: POST /link (kept in srv.links, the closed type list is checked, `supersedes` and
+`derived_from` are refused), POST /unlink (a removed system link is added to srv.rejections) and GET /links?id=ID (each link
+seen from that memory, the other end named from srv.names). Any request without an Authorization bearer header gets 401.
 """
 from __future__ import annotations
 
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 
 class FakeWorker:
@@ -31,6 +34,9 @@ class FakeWorker:
         self.headers: list = []
         self.replies: dict = {}
         self.captured: list = []
+        self.links: list = []  # {source_id, target_id, type, made_by, confidence, created_at}; a test may add made_by "system" rows
+        self.rejections: list = []  # (source_id, target_id, type) of each system link that was unlinked
+        self.names: dict = {}  # memory id to name, for GET /links
         self.url = ""
         self._server = None
         self._thread = None
@@ -39,6 +45,9 @@ class FakeWorker:
         if self._server:
             self._server.shutdown()
             self._server.server_close()
+
+
+USER_TYPES = ("about", "part_of", "owns", "affects", "decided", "contradicts", "about_person", "related")
 
 
 def _handler(state: FakeWorker):
@@ -95,6 +104,37 @@ def _handler(state: FakeWorker):
                 return self._send(200, {"ok": True, "proposals": state.proposals, "model": "fake"})
             if path in ("/forget", "/status") and method == "POST":
                 return self._send(200, {"ok": True})
+            if path == "/link" and method == "POST":
+                b = body or {}
+                if b.get("type") in ("supersedes", "derived_from"):
+                    return self._send(400, {"ok": False, "error": "That link type is written by the system.", "code": "reserved_link_type"})
+                if b.get("type") not in USER_TYPES:
+                    return self._send(400, {"ok": False, "error": "Link type must be one of: " + ", ".join(USER_TYPES), "code": "bad_link_type"})
+                key = (b.get("source_id"), b.get("target_id"), b.get("type"))
+                created = not any((l["source_id"], l["target_id"], l["type"]) == key for l in state.links)
+                if created:
+                    state.links.append({"source_id": key[0], "target_id": key[1], "type": key[2], "made_by": "user", "confidence": None, "created_at": len(state.links) + 1})
+                return self._send(200, {"ok": True, "created": created})
+            if path == "/unlink" and method == "POST":
+                b = body or {}
+                key = (b.get("source_id"), b.get("target_id"), b.get("type"))
+                found = [l for l in state.links if (l["source_id"], l["target_id"], l["type"]) == key]
+                for l in found:
+                    state.links.remove(l)
+                    if l["made_by"] == "system":
+                        state.rejections.append(key)
+                return self._send(200, {"ok": True, "removed": bool(found)})
+            if path == "/links" and method == "GET":
+                mid = parse_qs(urlparse(self.path).query).get("id", [""])[0]
+                rows = []
+                for l in sorted(state.links, key=lambda l: -l["created_at"]):
+                    if mid not in (l["source_id"], l["target_id"]):
+                        continue
+                    out = l["source_id"] == mid
+                    other = l["target_id"] if out else l["source_id"]
+                    rows.append({"type": l["type"], "direction": "out" if out else "in", "other_id": other, "other_name": state.names.get(other, ""),
+                                 "made_by": l["made_by"], "confidence": l["confidence"], "created_at": l["created_at"]})
+                return self._send(200, {"ok": True, "id": mid, "links": sorted(rows, key=lambda r: r["type"])})  # stable: newest first inside a type
             return self._send(404, {"ok": False, "error": "not found"})
 
         def do_GET(self):
