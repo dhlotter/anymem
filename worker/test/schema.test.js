@@ -10,7 +10,7 @@ const tables = (db) => db.sqlite.prepare("SELECT name FROM sqlite_master WHERE t
 
 test("migrations create every v2 table", async () => {
   const db = await migratedDb();
-  const want = ["audit", "capsule_cache", "counters", "devices", "link_rejections", "links", "memories", "memory_fts", "memory_keys", "memory_tags", "memory_versions", "meta", "recall_log", "runs", "write_counter"];
+  const want = ["audit", "capsule_cache", "counters", "devices", "link_rejections", "links", "memories", "memory_fts", "memory_keys", "memory_tags", "memory_versions", "meta", "recall_log", "runs", "subjects", "write_counter"];
   assert.deepEqual(tables(db), want);
 });
 
@@ -31,6 +31,28 @@ test("migration 0005 makes the links that already exist the user's, with no conf
   await db.exec(listMigrations().find((m) => m.version === 5).sql);
   assert.deepEqual({ ...(await db.prepare("SELECT made_by, confidence FROM links").first()) }, { made_by: "user", confidence: null });
   await assert.rejects(db.exec("INSERT INTO links (source_id, target_id, link_type, created_at, made_by) VALUES ('b', 'a', 'related', 1, 'robot')"), /CHECK/);
+});
+
+test("migration 0006 lets the devices that already exist see private subjects, and the subject constraints hold", async () => {
+  const db = new FakeD1();
+  const upto = (n) => listMigrations().filter((m) => m.version <= n).map((m) => m.sql).join("\n");
+  await db.exec(upto(5));
+  await db.exec("INSERT INTO devices (id, label, token_hash, created_at) VALUES ('d1', 'laptop', 'h', 1)");
+  await db.exec(listMigrations().find((m) => m.version === 6).sql);
+  assert.equal((await db.prepare("SELECT allow_private FROM devices").first()).allow_private, 1);
+  await assert.rejects(db.exec("UPDATE devices SET allow_private = 2"), /CHECK/);
+  await db.exec("INSERT INTO memories (id, content, content_hash, origin, valid_from, created_at, updated_at) VALUES ('c', 'c', 'h', 'system', 1, 1, 1)");
+  const add = (id, over = {}) => db.prepare("INSERT INTO subjects (id, slug, kind, status, scope, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, 1)").bind(id, over.slug ?? "pip", over.kind ?? "pet", over.status ?? "active", over.scope ?? "shared").run();
+  await assert.rejects(add("c", { kind: "cat" }), /CHECK/);
+  await assert.rejects(add("c", { status: "gone" }), /CHECK/);
+  await assert.rejects(add("c", { scope: "secret" }), /CHECK/);
+  await assert.rejects(add("missing"), /FOREIGN KEY/);
+  await add("c");
+  assert.deepEqual({ ...(await db.prepare("SELECT fields, aliases FROM subjects").first()) }, { fields: "{}", aliases: "[]" });
+  await db.exec("INSERT INTO memories (id, content, content_hash, origin, valid_from, created_at, updated_at) VALUES ('d', 'd', 'h2', 'system', 1, 1, 1)");
+  await assert.rejects(add("d"), /UNIQUE/, "one subject per slug");
+  await db.exec("DELETE FROM memories WHERE id = 'c'");
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM subjects").first()).n, 0, "deleting the card deletes the subject");
 });
 
 test("migrate records the version and a second run does nothing", async () => {

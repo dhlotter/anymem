@@ -1,4 +1,4 @@
--- The full anymem v2 schema. Migrations 0001 to 0005 together create exactly this.
+-- The full anymem v2 schema. Migrations 0001 to 0006 together create exactly this.
 -- Times are milliseconds since the epoch. Tags are lowercase. A live memory has deleted_at and valid_until both null.
 -- The Worker never applies schema on a request, worker/migrate.js does.
 
@@ -92,6 +92,23 @@ CREATE TABLE IF NOT EXISTS link_rejections (
   PRIMARY KEY (source_id, target_id, link_type)
 ) WITHOUT ROWID;
 
+-- A subject is a thing memories are about. Its card is an ordinary memory (id is the card memory id) that holds the brief.
+-- A memory is a member when an about link runs from it to the card. fields is JSON {key: {value, confirmed_at, source}}, aliases a JSON list.
+CREATE TABLE IF NOT EXISTS subjects (
+  id TEXT PRIMARY KEY,
+  slug TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL CHECK (kind IN ('person','pet','asset','project','area','topic')),
+  status TEXT NOT NULL CHECK (status IN ('proposed','active','stale','retired')),
+  scope TEXT NOT NULL DEFAULT 'shared' CHECK (scope IN ('shared','private')),
+  fields TEXT NOT NULL DEFAULT '{}',
+  aliases TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (id) REFERENCES memories (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_subjects_kind ON subjects (kind, status);
+
+-- allow_private is last and on its own line because that is where ALTER TABLE ADD COLUMN puts it in migration 0006.
 CREATE TABLE IF NOT EXISTS devices (
   id TEXT PRIMARY KEY,
   label TEXT NOT NULL,
@@ -99,7 +116,7 @@ CREATE TABLE IF NOT EXISTS devices (
   created_at INTEGER NOT NULL,
   last_used_at INTEGER,
   revoked_at INTEGER
-);
+, allow_private INTEGER NOT NULL DEFAULT 1 CHECK (allow_private IN (0,1)));
 
 CREATE TABLE IF NOT EXISTS capsule_cache (
   id INTEGER PRIMARY KEY CHECK (id = 1),

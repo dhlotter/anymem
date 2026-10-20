@@ -10,11 +10,11 @@ function newToken() {
   return "amd_" + btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-const shape = (r) => ({ id: r.id, label: r.label, created_at: r.created_at, last_used_at: r.last_used_at });
+const shape = (r) => ({ id: r.id, label: r.label, created_at: r.created_at, last_used_at: r.last_used_at, allow_private: r.allow_private === 1 });
 
 /** GET /devices, every device that is not revoked. */
 export async function listDevices({ env }) {
-  const { results } = await env.DB.prepare("SELECT id, label, created_at, last_used_at FROM devices WHERE revoked_at IS NULL ORDER BY created_at, id").all();
+  const { results } = await env.DB.prepare("SELECT id, label, created_at, last_used_at, allow_private FROM devices WHERE revoked_at IS NULL ORDER BY created_at, id").all();
   return json({ devices: results.map(shape) });
 }
 
@@ -36,4 +36,14 @@ export async function revokeDevice({ env, request, now, maxBody }) {
   const res = await env.DB.prepare("UPDATE devices SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(now(), body.id).run();
   if (res.meta.changes === 0) throw notFound("No active device has that id.");
   return json({ ok: true, id: body.id });
+}
+
+/** POST /devices/private {id, allow_private}. A device kept from private subjects never sees one. The admin token only, not a browser login. */
+export async function setDevicePrivate({ env, request, maxBody }) {
+  const body = await readJson(request, maxBody);
+  if (typeof body.id !== "string" || !body.id || body.id.length > MAX_ID_CHARS) throw badRequest("id is required.");
+  if (typeof body.allow_private !== "boolean") throw badRequest("allow_private must be true or false.");
+  const res = await env.DB.prepare("UPDATE devices SET allow_private = ? WHERE id = ? AND revoked_at IS NULL").bind(body.allow_private ? 1 : 0, body.id).run();
+  if (res.meta.changes === 0) throw notFound("No active device has that id.");
+  return json({ ok: true, id: body.id, allow_private: body.allow_private });
 }
