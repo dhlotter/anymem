@@ -9,7 +9,7 @@ export const NAV = [
   { name: "activity", label: "Activity", icon: "activity", group: 1 },
   { name: "trash", label: "Trash", icon: "trash", group: 1 },
   { name: "capsule", label: "Capsule", icon: "capsule", group: 2 },
-  { name: "people", label: "People", icon: "people", group: 2 },
+  { name: "people", label: "Profile", icon: "people", group: 2 },
   { name: "subjects", label: "Subjects", icon: "subjects", group: 2 },
   { name: "health", label: "Health", icon: "health", group: 3 },
   { name: "audit", label: "Audit", icon: "audit", group: 3 },

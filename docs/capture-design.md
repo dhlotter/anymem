@@ -1,6 +1,6 @@
 # Capture and probation
 
-A memory gets into the store three ways. You or your agent run `remember.py`. The agent saves one itself during a session because the skill tells it to. Or the capture hook reads a session when it ends. Nothing waits for review, except a profile fact that changes a value the profile already holds. That waits as a pending change on the People screen until you accept or dismiss it. Otherwise every memory is saved active, and the safety comes from the screens, the Worker's duplicate and contradiction checks, 60 days of probation for captures, a nightly merge, and an origin on every memory so it can be traced and removed.
+A memory gets into the store three ways. You or your agent run `remember.py`. The agent saves one itself during a session because the skill tells it to. Or the capture hook reads a session when it ends. Nothing waits for review, except a profile fact that changes a value the profile already holds. That waits as a pending change on the Profile screen until you accept or dismiss it. Otherwise every memory is saved active, and the safety comes from the screens, the Worker's duplicate and contradiction checks, 60 days of probation for captures, a nightly merge, and an origin on every memory so it can be traced and removed.
 
 ## 1. The agent saves as it goes
 

@@ -1,4 +1,4 @@
-// People. What waits for a decision comes first, then the profile, then each person note.
+// Profile. What waits for a decision comes first, then the profile. People are subjects of kind person and live on the Subjects tab.
 // Accept saves the value into the profile memory and moves the pending item to the trash, like the skill's `profile.py accept`.
 import { emptyState, icon } from "../lib/components.js";
 import { mountDrawer } from "../lib/drawer.js";
@@ -6,9 +6,9 @@ import { attempt, notify, onAction, say, show } from "../lib/dom.js";
 import { ago, count, formatNumber, titleOf } from "../lib/format.js";
 import { html } from "../lib/html.js";
 import { hashFor } from "../lib/route.js";
-import { FIELDS, findProfile, parseFacts, pendingCurrent, pendingField, pendingValue, personLines, renderFacts, setFact, tagsFor } from "../lib/profile.js";
+import { FIELDS, findProfile, parseFacts, pendingCurrent, pendingField, pendingValue, renderFacts, setFact, tagsFor } from "../lib/profile.js";
 
-export const title = "People";
+export const title = "Profile";
 
 /** Changes that wait for the owner, one line each, with the value now, the value proposed, and the three things you can do. */
 export const pendingView = (pending, facts, now, total = pending.length) =>
@@ -37,17 +37,9 @@ export const profileView = (profile) => {
     : emptyState("No profile yet", "Accepting a pending change creates it.")}</section>`;
 };
 
-/** The people as a table, a row to a note. A row opens the note in a drawer. */
-export const peopleView = (people, now = Date.now()) =>
-  html`<section class="panel" aria-labelledby="people-h"><h2 class="h2" id="people-h">People</h2>${people.length
-    ? html`<div class="scroll" tabindex="0" role="region" aria-label="People"><table class="data data--grid is-clickable data--people"><caption class="sr">The notes kept about people. A row opens the note.</caption>
-      <thead><tr><th scope="col" class="th">Person</th><th scope="col" class="th">What is known</th><th scope="col" class="th num">Changed</th></tr></thead>
-      <tbody>${people.map((p) => html`<tr data-id="${p.id}"><th scope="row"><a class="mem__title" href="${hashFor("people", { arg: p.id })}">${titleOf(p).replace(/^person-/, "")}</a></th><td class="mem__cell">${personLines(p.content).slice(0, 4).map(([l, v]) => `${l} ${v}`).join(", ")}</td><td class="num nowrap">${p.updated_at ? ago(p.updated_at, now) : ""}</td></tr>`)}</tbody></table></div>`
-    : emptyState("No person notes yet", "Notes about people your agents hear about appear here.")}</section>`;
-
 export function mount(root, ctx, arg) {
   let data = null;
-  show(root, html`<header class="head"><div><h1 tabindex="-1">People</h1><p class="head__intro">Your profile and the notes kept about the people you talk about.</p></div></header><div data-status></div><div data-out><p class="muted loading" role="status">Loading</p></div>`);
+  show(root, html`<header class="head"><div><h1 tabindex="-1">Profile</h1><p class="head__intro">Your own facts, and the changes waiting for you. The people you talk about are on <a class="link" href="${hashFor("subjects", { params: { kind: "person" } })}">Subjects</a>.</p></div></header><div data-status></div><div data-out><p class="muted loading" role="status">Loading</p></div>`);
   const status = root.querySelector("[data-status]");
   const out = root.querySelector("[data-out]");
   const drawer = mountDrawer(root, ctx, { back: () => hashFor("people"), changed: () => load(), title });
@@ -55,7 +47,7 @@ export function mount(root, ctx, arg) {
     data = await attempt(status, () => ctx.request("/ui/api/people"));
     if (!data) return;
     const profile = findProfile(data.profile);
-    show(out, html`${pendingView(data.pending, profile ? parseFacts(profile.content) : {}, ctx.now(), data.pending_total ?? data.pending.length)}${profileView(profile)}${peopleView(data.people, ctx.now())}`);
+    show(out, html`${pendingView(data.pending, profile ? parseFacts(profile.content) : {}, ctx.now(), data.pending_total ?? data.pending.length)}${profileView(profile)}`);
   }
   async function saveField(key, value) {
     const profile = findProfile(data.profile);
@@ -88,7 +80,7 @@ export function mount(root, ctx, arg) {
     },
   });
   root.addEventListener("click", (e) => {
-    const tr = e.target.closest(".data--profile tr[data-id], .data--people tr[data-id]");
+    const tr = e.target.closest(".data--profile tr[data-id]");
     if (tr && !e.target.closest("a, button")) location.hash = hashFor("people", { arg: tr.dataset.id }); // a row opens its memory in a drawer, here on People
   });
   load();

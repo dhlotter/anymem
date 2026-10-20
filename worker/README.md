@@ -2,7 +2,7 @@
 
 The Cloudflare Worker behind anymem. Plain JavaScript ES modules. No dependencies, no bundler, no build step. The code that runs is the code you read. Types are written as JSDoc comments.
 
-Version 2.0.6 (`version.js` and `package.json` agree). It holds auth, the audit trail, device tokens, health and stats, storage and history of memories, search, the write pipeline, extract, the capsule, the dashboard, the nightly job, backups and import. [ARCHITECTURE.md](ARCHITECTURE.md) says how each part works. The people who use anymem never run anything in this folder. `setup.py` uploads these files, see [docs/install.md](../docs/install.md).
+Version 2.0.7 (`version.js` and `package.json` agree). It holds auth, the audit trail, device tokens, health and stats, storage and history of memories, search, the write pipeline, extract, the capsule, the dashboard, the nightly job, backups and import. [ARCHITECTURE.md](ARCHITECTURE.md) says how each part works. The people who use anymem never run anything in this folder. `setup.py` uploads these files, see [docs/install.md](../docs/install.md).
 
 ## Test
 
@@ -103,7 +103,7 @@ Every route needs the Access JWT (unless `REQUIRE_ACCESS` is false) and then a b
 | `POST /vectorize-probe`, `GET /vectorize-probe?probe=` | any | the doctor's vector probe |
 | `GET /ui/api/overview`, `/ui/api/home`, `/ui/api/growth`, `/ui/api/recalls`, `/ui/api/probation`, `/ui/api/activity`, `/ui/api/runs`, `/ui/api/usage`, `/ui/api/audit-facets`, `/ui/api/harnesses` | admin, browser | read routes for the dashboard screens, they write nothing but the audit row |
 | `GET /ui/api/token-expiry`, `/ui/api/memory-extras` | any, browser | read routes for the dashboard |
-| `GET /ui/api/people` | admin, browser | the profile and person memories for the dashboard |
+| `GET /ui/api/people` | admin, browser | the profile and the changes waiting on it, for the Profile screen |
 | `GET /`, `GET /ui/*` | browser login only | the dashboard files |
 
 ### Recall
