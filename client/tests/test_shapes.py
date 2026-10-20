@@ -36,6 +36,9 @@ check("source_id reads the v2 and the old field", shapes.source_id({"source_id":
 check("ids_of finds the id, the match, the replaced and kept ids, results and entries, and nothing else",
       shapes.ids_of({"id": "a", "matchId": "b", "replaced": {"id": "c", "reason": "x"}, "kept_both": {"id": "d"}, "entry": {"id": "e"}, "results": [{"id": "f"}, {"id": "a"}], "entries": [{"id": "g"}], "content": "text"}) == list("abcdefg")
       and shapes.ids_of([{"id": "z"}]) == ["z"] and shapes.ids_of("x") == [])
+check("subjects reads the cards of a recall reply and skips what is not a dict", shapes.subjects({"results": [], "subjects": [{"slug": "pip"}, "junk"]}) == [{"slug": "pip"}]
+      and shapes.subjects({"results": []}) == [] and shapes.subjects({"subjects": "x"}) == [] and shapes.subjects(None) == [])
+check("ids_of adds a subject's card id and the cards of a list", shapes.ids_of({"subject": {"id": "s1"}, "subjects": [{"id": "s2"}]}) == ["s1", "s2"])
 check("name_of and description_of read the v2 field or the frontmatter", shapes.name_of({"name": "v2"}) == "v2" and shapes.name_of({"content": "---\nname: old\ndescription: \"d\"\n---\nb"}) == "old"
       and shapes.description_of({"content": "---\nname: old\ndescription: \"d\"\n---\nb"}) == "d" and shapes.name_of({}) == "")
 
