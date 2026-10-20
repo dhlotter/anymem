@@ -30,8 +30,21 @@ export function factsView(e, extras, now) {
   <div><dt>Id</dt><dd class="mono">${e.id}</dd></div></dl>`;
 }
 
-export const linksView = (links) =>
-  links === null ? "" : html`<h3 class="h3">Links</h3>${links.length ? html`<ul class="plain">${links.map((l) => html`<li>${l.direction === "out" ? "Links to" : "Linked from"} <a href="${memoryLink(l.id)}">${l.name || l.id.slice(0, 8)}</a> <span class="muted">${l.type}</span></li>`)}</ul>` : html`<p class="muted">No links yet.</p>`}`;
+// The link types, the same closed list the Worker keeps. The system alone writes the last two kinds below, so the form does not offer them.
+export const LINK_TYPES = ["about", "part_of", "owns", "affects", "decided", "supersedes", "contradicts", "derived_from", "about_person", "related"];
+const SYSTEM_ONLY = ["supersedes", "derived_from"];
+export const ADDABLE_LINK_TYPES = LINK_TYPES.filter((t) => !SYSTEM_ONLY.includes(t));
+const shownType = (type) => (LINK_TYPES.includes(type) ? type : "related"); // an older link with free text shows as related
+
+/** One link of the open memory. The button keeps the stored type, so a link of an older free text type can still be taken away. */
+const linkRow = (l) => html`<li><span>${l.direction === "out" ? "Links to" : "Linked from"} <a href="${memoryLink(l.other_id)}">${l.other_name || l.other_id.slice(0, 8)}</a>${l.made_by === "system" ? html` ${badge("made by anymem", "muted")}${typeof l.confidence === "number" ? html` <span class="muted">${Math.round(l.confidence * 100)}% sure</span>` : ""}` : ""}</span><button type="button" class="btn btn--quiet" data-action="unlink" data-other="${l.other_id}" data-direction="${l.direction}" data-type="${l.type}" data-made-by="${l.made_by}">${l.made_by === "system" ? "Not this" : "Remove"}<span class="sr"> link, ${l.other_name || l.other_id.slice(0, 8)}</span></button></li>`;
+
+/** The links of a memory from GET /links, grouped by type. Null leaves the section out, for a Worker that could not list them. */
+export function linksView(links) {
+  if (links === null) return "";
+  const groups = LINK_TYPES.map((t) => [t, links.filter((l) => shownType(l.type) === t)]).filter(([, rows]) => rows.length);
+  return html`<h3 class="h3">Links</h3>${groups.length ? groups.map(([t, rows]) => html`<h4 class="h3">${t}</h4><ul class="plain links">${rows.map(linkRow)}</ul>`) : html`<p class="muted">No links yet.</p>`}`;
+}
 
 /** One line of a diff. The marker is drawn by the stylesheet and the words are for a screen reader. */
 export function diffView(before, after, label) {
@@ -53,7 +66,7 @@ export const editForm = (e) => html`<form class="stack" data-form="edit" aria-la
   <p class="muted small">The save is refused if anyone changed this memory after you opened it.</p>
   <p class="actions"><button type="submit" class="btn btn--primary">Save changes</button><button type="button" class="btn" data-action="cancel">Cancel</button></p></form>`;
 export const appendForm = () => html`<form class="stack" data-form="append" aria-label="Append to the memory"><label class="field">Text to add after a blank line<textarea name="addition" rows="4" required></textarea></label><p class="actions"><button type="submit" class="btn btn--primary">Append</button><button type="button" class="btn" data-action="cancel">Cancel</button></p></form>`;
-export const linkForm = () => html`<form class="stack row-form" data-form="link" aria-label="Link to another memory"><label class="field">Other memory id<input name="target" required maxlength="64" autocomplete="off"></label><label class="field">Link type<input name="type" value="related" required maxlength="64" pattern="[a-z0-9][a-z0-9_\\-]*"></label><p class="actions"><button type="submit" class="btn btn--primary">Add link</button><button type="button" class="btn" data-action="cancel">Cancel</button></p></form>`;
+export const linkForm = () => html`<form class="stack row-form" data-form="link" aria-label="Link to another memory"><label class="field">Other memory id<input name="target" required maxlength="64" autocomplete="off"></label><label class="field">Link type<select name="type">${ADDABLE_LINK_TYPES.map((t) => html`<option value="${t}" ${t === "related" ? "selected" : ""}>${t}</option>`)}</select></label><p class="actions"><button type="submit" class="btn btn--primary">Add link</button><button type="button" class="btn" data-action="cancel">Cancel</button></p></form>`;
 
 /** The whole panel for one memory. */
 export function detailView(e, { versions, extras, links, back = hashFor("memories") }, now) {
@@ -159,12 +172,12 @@ export function mountDrawer(root, ctx, { back, changed, title, closed = () => {}
       entry = (await attempt(msg, () => ctx.request(`/entry?id=${q}&deleted=1`), undefined, stillOpen))?.entry; // it may be in the trash
       if (!entry) return;
     }
-    const [versions, extras] = await Promise.all([ctx.request(`/history?id=${q}`).then((r) => r.versions).catch(() => []), ctx.request(`/ui/api/memory-extras?id=${q}`).catch(() => null)]);
+    const [versions, extras, links] = await Promise.all([ctx.request(`/history?id=${q}`).then((r) => r.versions).catch(() => []), ctx.request(`/ui/api/memory-extras?id=${q}`).catch(() => null), ctx.request(`/links?id=${q}`).then((r) => r.links).catch(() => null)]);
     if (q !== encodeURIComponent(state.id)) return; // the person moved on while this loaded
     state.entry = entry;
     state.version = versions[0]?.seq ?? 0;
     msg.replaceChildren();
-    body.innerHTML = String(detailView(entry, { versions, extras, links: extras ? extras.links : null, back: back() }, ctx.now()));
+    body.innerHTML = String(detailView(entry, { versions, extras, links, back: back() }, ctx.now()));
     document.title = `${titleOf(entry)}, anymem`;
     if (message) notice(message);
   }
@@ -238,6 +251,16 @@ export function mountDrawer(root, ctx, { back, changed, title, closed = () => {}
       slot.querySelector("textarea, input")?.focus();
     },
     cancel: () => (panel.querySelector("[data-editor]").replaceChildren()),
+    // A link the system made is refused for good, so the Worker records it and never makes it again. A link a person made can be put back.
+    async unlink(el) {
+      const gone = state.id;
+      const out = el.dataset.direction === "out";
+      const body = { source_id: out ? gone : el.dataset.other, target_id: out ? el.dataset.other : gone, type: el.dataset.type };
+      if (!(await attempt(panel.querySelector("[data-editor]") ?? msg, () => ctx.request("/unlink", { method: "POST", body })))) return;
+      if (el.dataset.madeBy === "system") return void (await loadEntry("Noted. anymem will not make that link again."));
+      await loadEntry();
+      if (ADDABLE_LINK_TYPES.includes(body.type)) notify("Link removed.", { action: { label: "Undo", run: () => ctx.request("/link", { method: "POST", body }).then(() => state.id === gone && loadEntry()).catch((err) => notify(err.message, { tone: "error" })) } });
+    },
     async undo() {
       const id = state.id;
       if (await act("/undo", {})) {

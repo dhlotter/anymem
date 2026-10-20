@@ -5,6 +5,7 @@ import { badge, emptyState, harnessChip, originChip, provenance, segmented, shar
 import { stackedBars } from "../ui/lib/chart.js";
 import { appliedChips } from "../ui/lib/grid.js";
 import { activeFilters, detailView, diffView, editForm, factsView, historyView, linksView, listView, tableRow } from "../ui/screens/memories.js";
+import { ADDABLE_LINK_TYPES, linkForm } from "../ui/lib/drawer.js";
 import { capsuleText, capsuleView } from "../ui/screens/capsule.js";
 import { auditRows, stripView } from "../ui/screens/audit.js";
 import { backupsView, capacityView, capturesView, checksView, countsView, limitView, runsView } from "../ui/screens/health.js";
@@ -89,6 +90,7 @@ function views(t) {
   const recalls = { days: days(3, (i) => ({ calls: 10 + i, empty: i })), total: 33, empty: 3, by_harness: [{ harness: t.script, label: t.img, calls: 20, empty: 2 }, { harness: "claude", label: "Claude Code", calls: 13, empty: 1 }], most_recalled: [{ id: t.quote, title: t.script, origin: "explicit", project: t.attr, recall_count: 9, last_recalled_at: NOW }, { id: "b", title: t.img, origin: "capture", project: "", recall_count: 3, last_recalled_at: NOW }], never_recalled: { count: 4, sample: [{ id: t.quote, title: t.script, origin: t.img, project: "", created_at: NOW - 9 * DAY }] } };
   const probation = { total: 3, entries: [{ id: t.quote, title: t.script, origin: "capture", project: "", created_at: NOW - 50 * DAY, probation_until: NOW + 10 * DAY, days_left: 10, recall_count: 0, retires: true, retire_at: NOW + 10 * DAY }, { id: "b", title: t.img, origin: "capture", project: "", created_at: NOW - 5 * DAY, probation_until: NOW + 55 * DAY, days_left: 55, recall_count: 2, retires: true, retire_at: null }, ...Array.from({ length: 9 }, (_, i) => ({ id: `c${i}`, title: t.md, origin: "capture", project: "", created_at: NOW, probation_until: NOW + DAY, days_left: 1, recall_count: 0, retires: true, retire_at: null }))] };
   const versions = [{ seq: 2, reason: t.attr, at: NOW - 1000, summary: `${t.script} ${t.img}` }, { seq: 1, reason: "update", at: NOW - 5000, summary: "" }];
+  const links = [{ direction: "out", other_id: t.quote, other_name: t.script, type: t.attr, made_by: "user", confidence: null, created_at: NOW }, { direction: "in", other_id: "x", other_name: t.img, type: "about", made_by: "system", confidence: 0.8, created_at: NOW }];
   const extras = { probation_until: NOW + 1000, links: [{ direction: "out", id: t.quote, name: t.script, type: t.attr }, { direction: "in", id: "x", name: t.img, type: "related" }], saved_by: { at: NOW - 5000, by: t.script, kind: "device", script: `hook:${t.img}` }, recalled_by: [{ harness: t.quote, label: t.attr, times: 8 }, { harness: "codex", label: "Codex", times: 2 }], recall_log_since: NOW - 3 * DAY };
   const harnesses = {
     sources: { total: 12, rows: [{ harness: t.script, label: t.img, filter: t.quote, memories: 7 }, { harness: "", label: "Imported", filter: "none", memories: 3 }, { harness: "", label: t.attr, filter: "none", memories: 2 }] },
@@ -147,10 +149,11 @@ function views(t) {
     ["resultsView", resultsView({ results: [hit(t), hit(t, { relevant: false })], degraded: t.script, took_ms: 4 }, t.quote)],
     ["listView", listView([e], t.quote, NOW, e.id, { origin: t.script, project: t.quote, tag: t.attr, time: t.img, status: t.img, type: t.script, sort: t.md, harness: t.quote }, harnesses.sources.rows)],
     ["factsView", factsView(e, extras, NOW)],
-    ["linksView", linksView(extras.links)],
+    ["linksView", linksView(links)],
     ["historyView", historyView(versions, NOW)],
     ["editForm", editForm(e)],
-    ["detailView", detailView(e, { versions, extras, links: extras.links }, NOW)],
+    ["linkForm", linkForm()],
+    ["detailView", detailView(e, { versions, extras, links }, NOW)],
     ["detailView trashed", detailView(entry(t, { deleted_at: NOW - 5 * DAY }), { versions, extras, links: null }, NOW)],
     ["detailView closed", detailView(entry(t, { valid_until: NOW - 5, superseded_by: t.quote }), { versions, extras, links: null }, NOW)],
     ["diffView", diffView(`a\n${t.script}\nc`, `a\nX${t.img}\nc\nX${t.pre}`, "This change")],
@@ -293,6 +296,44 @@ test("a chart always has a table twin and a legend, and a tooltip on every bar",
   assert.match(asTable, /data-plot="growth"[^>]*hidden/);
   assert.match(asTable, /aria-pressed="true"/);
   assert.match(String(stackedBars({ buckets: [{ label: "1 Oct", values: { a: 1 } }], series: [{ key: "a", label: "A", cls: "s1" }], width: 300, summary: "s" })), /data-tip="1 Oct\nA 1"/);
+});
+
+const link = (over = {}) => ({ type: "about", direction: "out", other_id: "id-other-1", other_name: "corolla-service", made_by: "user", confidence: null, created_at: NOW, ...over });
+
+test("links are grouped by type, name the other memory, and say which way they go", () => {
+  const out = String(linksView([link(), link({ other_id: "id-other-2", other_name: "pip-vet", direction: "in", type: "about" }), link({ other_id: "id-other-3", other_name: "alpha-plan", type: "part_of" })]));
+  assert.equal([...out.matchAll(/<h4 class="h3">(\w+)<\/h4>/g)].map((m) => m[1]).join(","), "about,part_of", "one heading a type, in the order of the list");
+  assert.match(out, /Links to <a href="#\/memories\/id-other-1">corolla-service<\/a>/);
+  assert.match(out, /Linked from <a href="#\/memories\/id-other-2">pip-vet<\/a>/);
+  assert.match(String(linksView([])), /No links yet/);
+  assert.equal(String(linksView(null)), "", "a Worker that could not list them leaves the section out");
+});
+
+test("a link of a type outside the list shows as related, and its button still carries the stored type", () => {
+  const out = String(linksView([link({ type: "likes-a-lot" })]));
+  assert.match(out, /<h4 class="h3">related<\/h4>/);
+  assert.doesNotMatch(out, /<h4[^>]*>likes-a-lot/);
+  assert.match(out, /data-type="likes-a-lot"/);
+});
+
+test("a system link shows its confidence and offers Not this, and a user link offers Remove", () => {
+  const sys = String(linksView([link({ made_by: "system", confidence: 0.82 })]));
+  assert.match(sys, /made by anymem/);
+  assert.match(sys, /82% sure/);
+  assert.match(sys, /data-action="unlink"[^>]*data-made-by="system">Not this/);
+  const mine = String(linksView([link()]));
+  assert.match(mine, /data-made-by="user">Remove/);
+  assert.doesNotMatch(mine, /made by anymem|sure/);
+  assert.doesNotMatch(String(linksView([link({ made_by: "system", confidence: null })])), /sure/, "a link without a confidence shows none");
+});
+
+test("the link form offers the closed list of types except the two the system writes", () => {
+  const out = String(linkForm());
+  assert.deepEqual([...out.matchAll(/<option value="(\w+)"/g)].map((m) => m[1]), ADDABLE_LINK_TYPES);
+  assert.equal(ADDABLE_LINK_TYPES.length, 8);
+  assert.doesNotMatch(out, /value="supersedes"|value="derived_from"/);
+  assert.match(out, /<option value="related" selected>/);
+  assert.doesNotMatch(out, /<input name="type"/, "the type is chosen, never typed");
 });
 
 test("the memory panel offers actions only where they work", () => {
