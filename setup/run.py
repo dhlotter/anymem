@@ -322,7 +322,7 @@ def run_setup(opts: Options) -> int:
             say("  The Worker exists but its token is not on this machine, so a new AUTH_TOKEN is set. Device tokens keep working.")
         modules, assets = worker.collect_modules(opts.root), worker.collect_assets(opts.root)
         asset_token = worker.upload_assets(client, n["worker"], assets, say)
-        meta = worker.metadata(config_data, n, d1_id, asset_token, worker.vars_for(config_data, access), auth_token)
+        meta = worker.metadata(config_data, n, d1_id, asset_token, worker.vars_for(config_data, access, state.get("plan") or ""), auth_token)
         worker.upload_script(client, n["worker"], modules, meta, say)
         resources.record(state, "worker", n["worker"], save)
         step = "cron trigger"

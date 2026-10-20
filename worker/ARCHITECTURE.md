@@ -1,6 +1,6 @@
 # Worker architecture
 
-Version 2.0.3. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
+Version 2.0.4. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
 
 ## Module map
 
@@ -532,7 +532,7 @@ Browser logins are accepted on the reads, and on the dashboard writes under the 
 ## Nightly job
 
 `cron/maintenance.js` runs from the one cron trigger (01:00 UTC) and from `POST /admin/run-maintenance` (admin only, optional
-`{steps: [...], wall_ms, subrequests}`). The steps share one budget of 40 subrequests for the whole run, counted by wrapping the
+`{steps: [...], wall_ms, subrequests}`). The steps share one budget of 40 subrequests for the whole run (`NIGHTLY_SUBREQUESTS`, 400 on a Paid store), counted by wrapping the
 bindings (`cron/budget.js`, a D1 batch counts once). Each step has 20 seconds. A step stops when the run's budget is used, and what is left continues the
 next night. A step that throws, or that has not finished 15 seconds after its wall time (a call that never answers), is recorded as `{error}` and the others still run. One `runs` row holds the job (`nightly` or
 `manual`), times, `ok` (false when a step failed or the backup was refused) and a summary of the form `{step: {counts, subrequests, ms}}`.

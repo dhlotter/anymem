@@ -6,7 +6,7 @@ import { DAY, indexAll, modelKind, row, rows, runNightly, seed } from "./helpers
 import { BASE_30, SWAP_30, OLD_FACT, NEW_FACT, distinct } from "./helpers/write.js";
 import { RETENTION_MS, recordAudit } from "../audit.js";
 import { overlap } from "../cron/merge.js";
-import { createBudget, countedEnv } from "../cron/budget.js";
+import { createBudget, countedEnv, nightlyLimits } from "../cron/budget.js";
 import { runMaintenance, STEPS } from "../cron/maintenance.js";
 import { dayOf } from "../counters.js";
 
@@ -118,6 +118,13 @@ test("a call that never answers is given up on, and the later steps still run", 
 });
 
 // ------------------------------------------------------------------ the budget
+
+test("the nightly limits come from the environment, with the Free defaults and a fallback for a bad value", () => {
+  assert.deepEqual(nightlyLimits({}), { subrequests: 40, wallMs: 20_000 });
+  assert.deepEqual(nightlyLimits({ NIGHTLY_SUBREQUESTS: "400", NIGHTLY_WALL_MS: "120000" }), { subrequests: 400, wallMs: 120_000 });
+  for (const bad of ["", "abc", "0", "5", "-3", "1.5", "99999"]) assert.equal(nightlyLimits({ NIGHTLY_SUBREQUESTS: bad }).subrequests, 40, JSON.stringify(bad));
+  assert.equal(nightlyLimits({ NIGHTLY_WALL_MS: "50" }).wallMs, 20_000, "under a second is ignored");
+});
 
 test("a budget runs out by subrequests and by time", () => {
   let t = 0;
@@ -244,6 +251,18 @@ test("reindex works in batches sized by the budget and finishes over several run
   let left = first.remaining;
   for (let i = 0; i < 10 && left > 0; i++) left = (await only(app, "reindex", { subrequests: 24 })).remaining;
   assert.equal(left, 0);
+});
+
+test("a store with NIGHTLY_SUBREQUESTS set clears a backlog in one run that the default needs several for", async () => {
+  const app = await createApp();
+  for (let i = 0; i < 40; i++) await seed(app, { name: `bulk-${i}`, text: `zq${i} one two three` });
+  const small = await runNightly(app, { steps: ["reindex"] });
+  assert.ok(small.summary.reindex.remaining > 0, `the default left ${small.summary.reindex.remaining}`);
+  app.env.NIGHTLY_SUBREQUESTS = "400";
+  app.env.NIGHTLY_WALL_MS = "120000";
+  const big = await runNightly(app, { steps: ["reindex"] });
+  assert.equal(big.summary.reindex.remaining, 0);
+  assert.equal(big.summary.reindex.processed, small.summary.reindex.remaining, "the rest went in one run");
 });
 
 test("a failing embedding is recorded as the step's error and nothing else stops", async () => {

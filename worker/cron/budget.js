@@ -7,6 +7,21 @@ export const DEFAULT_WALL_MS = 20_000;
 // check the budget (backup, purge_old) fit in the rest.
 export const DEFAULT_SUBREQUESTS = 40;
 
+const within = (value, low, high, fallback) => {
+  const n = Number(value);
+  return Number.isSafeInteger(n) && n >= low && n <= high ? n : fallback;
+};
+
+/**
+ * The limits of a nightly run. The defaults are for Free. A store on Workers Paid sets NIGHTLY_SUBREQUESTS (Paid allows 10,000 an
+ * invocation) and NIGHTLY_WALL_MS (the time each step may take) so a backlog clears in a night or two instead of a few memories a night.
+ * A value that is missing or out of range is ignored and the default is used.
+ * @param {{NIGHTLY_SUBREQUESTS?: string, NIGHTLY_WALL_MS?: string}} env
+ */
+export function nightlyLimits(env) {
+  return { subrequests: within(env?.NIGHTLY_SUBREQUESTS, 10, 5000, DEFAULT_SUBREQUESTS), wallMs: within(env?.NIGHTLY_WALL_MS, 1000, 600_000, DEFAULT_WALL_MS) };
+}
+
 /**
  * @param {{now: () => number, wallMs?: number, subrequests?: number, pool?: {spent: number}}} args
  *   pool is the count shared by the steps of one run. Without it the budget counts on its own.

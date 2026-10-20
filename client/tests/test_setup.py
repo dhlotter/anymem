@@ -629,6 +629,9 @@ check("a bad --name stops before anything", rc == 1 and "not a usable --name" in
 # ALLOWED_HOSTS from the committed wrangler.jsonc is carried to the Worker settings, the ACCESS_ values never are
 carried = worker.vars_for({"vars": {"ALLOWED_HOSTS": "memory.example.com", "ACCESS_AUD": "committed", "RECALL_MIN_SIM": "0.75"}}, {"team_domain": "t.cloudflareaccess.com", "aud": "real", "common_name": "x.access", "email": "me@example.com", "expires": "2027-10-17"})
 check("ALLOWED_HOSTS is carried and the committed ACCESS_ value is replaced", carried["ALLOWED_HOSTS"] == "memory.example.com" and carried["ACCESS_AUD"] == "real" and carried["RECALL_MIN_SIM"] == "0.75")
+check("a Paid store gets the bigger nightly budget, Free and no plan keep the Worker defaults", worker.vars_for({"vars": {}}, None, "paid").get("NIGHTLY_SUBREQUESTS") == "400" and worker.vars_for({"vars": {}}, None, "paid").get("NIGHTLY_WALL_MS") == "120000"
+      and "NIGHTLY_SUBREQUESTS" not in worker.vars_for({"vars": {}}, None, "free") and "NIGHTLY_SUBREQUESTS" not in worker.vars_for({"vars": {}}, None))
+check("a nightly budget in the config file wins over the plan", worker.vars_for({"vars": {"NIGHTLY_SUBREQUESTS": "900"}}, None, "paid")["NIGHTLY_SUBREQUESTS"] == "900")
 check("no ALLOWED_HOSTS in the committed file means none is uploaded", "ALLOWED_HOSTS" not in worker.vars_for({"vars": {}}, None))
 
 print("\n%d failed" % len(failures) if failures else "\nall passed")
