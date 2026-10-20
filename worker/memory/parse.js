@@ -5,6 +5,9 @@ export const MAX_CONTENT_CHARS = 30_000;
 export const STATUSES = ["canonical", "active", "deprecated", "pending"];
 export const KINDS = ["semantic", "episodic"];
 export const TYPES = ["user", "feedback", "project", "reference"];
+/** The link types. A caller of POST /link may use any of them except the two only the system writes. */
+export const LINK_TYPES = ["about", "part_of", "owns", "affects", "decided", "supersedes", "contradicts", "derived_from", "about_person", "related"];
+export const RESERVED_LINK_TYPES = ["supersedes", "derived_from"];
 
 const MAX_TAGS = 50;
 const MAX_TAG_CHARS = 64;

@@ -25,7 +25,9 @@ Each job is one short script. Run it with `python3 <this skill's folder>/scripts
 | `restore.py ID` | bring it back from the trash |
 | `undo.py ID` | revert the last change, or reopen a memory a newer one replaced |
 | `history.py ID` | every change to a memory |
-| `link.py A B` | record that two memories are related |
+| `link.py A B [TYPE]` | link two memories, TYPE is one of about, part_of, owns, affects, decided, contradicts, about_person, related (default related) |
+| `unlink.py A B TYPE` | remove a link |
+| `links.py ID` | a memory's links, grouped by type, `out` when it is the source and `in` when it is the target |
 | `profile.py`, `person.py` | the person's own facts, and the people they talk about |
 | `usage.py` | what memory adds to prompts, from this machine's record |
 | `backup.py` | a local copy of the whole store |

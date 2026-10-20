@@ -167,7 +167,7 @@ test("a step stops when the time budget is used and the next run continues", asy
 
 // ------------------------------------------------------------------ purge the trash
 
-test("purge removes memories trashed more than 14 days ago with their tags, keys, versions, links and vectors", async () => {
+test("purge removes memories trashed more than 14 days ago with their tags, keys, versions, links, link rejections and vectors", async () => {
   const app = await createApp();
   const old = await seed(app, { name: "old-trash", text: "zqold alpha beta", tags: ["red"] });
   const edge = await seed(app, { name: "edge-trash", text: "zqedge alpha beta" });
@@ -178,6 +178,7 @@ test("purge removes memories trashed more than 14 days ago with their tags, keys
   await app.env.DB.batch([
     app.env.DB.prepare("INSERT INTO memory_versions (memory_id, seq, snapshot, reason, created_at) VALUES (?, 1, '{}', 'update', ?)").bind(old, START),
     app.env.DB.prepare("INSERT INTO links (source_id, target_id, link_type, created_at) VALUES (?, ?, 'related', ?)").bind(keep, old, START),
+    app.env.DB.prepare("INSERT INTO link_rejections (source_id, target_id, link_type, created_at) VALUES (?, ?, 'about', ?), (?, ?, 'about', ?), (?, ?, 'about', ?)").bind(keep, old, START, old, keep, START, keep, edge, START),
   ]);
   const before = app.env.VECTORIZE.vectors.size;
   // a vector whose key row lost its vector id, as after a trash change that was not yet reindexed
@@ -190,6 +191,7 @@ test("purge removes memories trashed more than 14 days ago with their tags, keys
   assert.ok(await row(app, keep));
   for (const table of ["memory_tags", "memory_versions", "memory_keys"]) assert.equal((await rows(app, `SELECT * FROM ${table} WHERE memory_id = ?`, old)).length, 0, table);
   assert.equal((await rows(app, "SELECT * FROM links")).length, 0);
+  assert.deepEqual((await rows(app, "SELECT source_id, target_id FROM link_rejections")).map((r) => ({ ...r })), [{ source_id: keep, target_id: edge }], "the rejections of the purged memory go, in both directions");
   assert.equal((await rows(app, "SELECT * FROM memory_fts WHERE memory_id = ?", old)).length, 0);
   assert.ok([...app.env.VECTORIZE.vectors.keys()].every((id) => !id.startsWith(old)), "the vectors are gone");
   assert.ok(app.env.VECTORIZE.vectors.size < before);

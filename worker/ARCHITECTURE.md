@@ -1,6 +1,6 @@
 # Worker architecture
 
-Version 2.0.4. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
+Version 2.0.5. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
 
 ## Module map
 
@@ -15,7 +15,7 @@ Version 2.0.4. This file says how the Worker is built and why. The routes and se
 | `memory/parse.js` | Frontmatter, hashtags, reserved tags, content hash, the 30,000 character limit. Pure, no database. |
 | `memory/store.js` | The storage layer on D1. `createStore(db, now)` gives create, get, getVersion, update, append, setStatus, softDelete, restore, supersede, undo, history, link and list. |
 | `memory/diff.js` | The one line summary of what a version changed, used by history. |
-| `memory/routes.js` | The handlers for `/entry`, `/list`, `/history`, `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link`. |
+| `memory/routes.js` | The handlers for `/entry`, `/list`, `/history`, `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link`, `/unlink`, `/links`. |
 | `search/chunk.js` | Cuts a memory into chunks (1,600 characters, 200 overlap, at paragraph, sentence or word breaks), builds the search keys, and makes the vector ids. |
 | `search/embed.js` | Workers AI `@cf/baai/bge-small-en-v1.5`, 384 dimensions, batches of 50. |
 | `search/indexer.js` | Keeps `memory_keys` and Vectorize in step with the memories. Also `reindex`. |
@@ -91,7 +91,7 @@ made with a browser login is only accepted when the request proves it came from 
 2. `Sec-Fetch-Site` is `same-origin` when the browser sends it. Absent is allowed, rules 1 and 3 still apply.
 3. The `X-Anymem-UI` header is `1`. A cross site form or a simple request cannot set a custom header.
 
-Routes with `browserWrite: true`: `/capture`, `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link`.
+Routes with `browserWrite: true`: `/capture`, `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link`, `/unlink`.
 `/capture` is wrapped by `profileSavesOnly`. A browser may only save `origin` or `source` of `profile` or `person`
 through it (403 `browser_capture_scope` otherwise), because that is all the People screen needs. Every other write route has neither flag, so it stays bearer only. That covers
 `/devices`, `/devices/revoke`, `/import`, `/backup/run`, `/admin/reindex`, `/admin/questions`, `/admin/harness`, `/admin/run-maintenance` and `/extract`.
@@ -255,7 +255,7 @@ rows older than 90 days.
    `GET /history` works on a trashed memory.
 3. `/restore` works while `now - deleted_at` is at most 14 days. After that it is 410 `restore_window_passed`. A memory
    that is not in the trash is 409 `not_in_trash`. Forgetting a trashed memory returns the same entry and changes nothing.
-4. The nightly `purge_trash` step deletes a memory 14 days after it was trashed, with its rows, tags, keys, links, versions, FTS row and vectors.
+4. The nightly `purge_trash` step deletes a memory 14 days after it was trashed, with its rows, tags, keys, links, link rejections, versions, FTS row and vectors.
 
 ### Validity and lists
 
@@ -265,6 +265,16 @@ rows older than 90 days.
 3. Pinned is set from the tags `capsule:core` and `capsule-slot:*`, and from the origins `profile` and `person`.
    It is recomputed on every content or tag update.
 4. `store.supersede(oldId, newId, at, reason)` has no route. The write pipeline and the nightly merge call it.
+
+### Links
+
+1. A link is `(source_id, target_id, link_type)` between two live memories, plus `created_at`, `made_by` (`user` or `system`, default `user`) and `confidence` (a number the system sets, null for a user link). Migration 0005 added the last two. Links that existed before are the user's.
+2. The link types are `about`, `part_of`, `owns`, `affects`, `decided`, `supersedes`, `contradicts`, `derived_from`, `about_person` and `related` (`LINK_TYPES` in `memory/parse.js`). `POST /link` takes any of them except `supersedes` and `derived_from`, which only the system writes. An unknown type is 400 `bad_link_type` and the message lists the types. A reserved type is 400 `reserved_link_type`. Rows with another free text type from before the list stay as they are, and `GET /links` returns the stored type. A client shows a type outside the list as `related`.
+3. `POST /unlink {source_id, target_id, type}` replies `{ok, removed}`. Removing a link with `made_by = 'system'` also inserts `(source_id, target_id, link_type, created_at)` into `link_rejections` in the same batch, so the system never makes that link again. Removing a user link writes no rejection.
+4. A device token may remove only user links. A system link is 403 `admin_only`, and the link stays. A link with either end holding capsule tags or the canonical status is refused to a device token with the same 403 as an edit of that memory (`guardDevice`). The admin token and a browser login may remove any link.
+5. `GET /links?id=` is `{ok, id, links: [{type, direction, other_id, other_name, made_by, confidence, created_at}]}`, sorted by type and then newest first. `direction` is `out` when the memory is the source and `in` when it is the target. Only ends that are not in the trash are listed. An id that exists nowhere is 404. Every token kind that reads memories may call it.
+6. `/link` and `/unlink` audit both memory ids, and `/links` the one id. `/unlink` takes a write slot from a device token like `/link` does.
+7. The trash purge deletes the links and the `link_rejections` rows of a purged memory, in both directions.
 
 ## Reply shapes
 
@@ -278,6 +288,8 @@ Errors are `{error, code}`. Replies below all carry `ok: true`.
 | `POST /capture` | `{ok, id, status, tags}` |
 | `POST /update`, `/append`, `/status`, `/forget`, `/restore`, `/undo` | `{ok, entry}` |
 | `POST /link` | `{ok, created}`, false when the link already existed |
+| `POST /unlink` | `{ok, removed}`, false when there was no such link |
+| `GET /links?id=` | `{ok, id, links: [{type, direction, other_id, other_name, made_by, confidence, created_at}]}`, see Links under Storage rules |
 
 The entry is `{id, name, description, type, body, content, tags, status, origin, harness, harness_label, session, project, kind,
 pinned, valid_from, valid_until, superseded_by, recall_count, last_recalled_at, created_at, updated_at, deleted_at}`.
@@ -404,7 +416,7 @@ Origin comes from `origin`, else from `source` (`session-capture` is capture, `c
    A refusal is HTTP 422 `{ok: false, error, code: "refused", reason}`. The reasons are `secret`, `instruction`, `injected_block`,
    `blocked_topic` and `sensitive`.
 3. **Limit.** `limits.js`. More than 40 writes per device token in a rolling 10 minutes is HTTP 429, across every write route (`/capture`,
-   `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link`), not only captures. The reply is
+   `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link`, `/unlink`), not only captures. The reply is
    `{error, code: "rate_limited", retry_after}` with a `Retry-After` header. The admin token and a browser login are not counted. Each write is a
    `write_counter` row keyed by its own millisecond, so the count is exact. A refused attempt gives its slot back, so hammering
    does not extend the wait. Nothing is held. Writes refused by a screen are not counted. Duplicates are.
@@ -529,7 +541,7 @@ The dashboard prints each step's object as JSON.
 | Step | What it does | Cost per unit |
 |---|---|---|
 | `backup` | `backups/anymem-YYYY-MM-DD.json.gz` in R2, streamed as a multipart upload in 8 MB parts, so the store is never held in memory. Refused when it has fewer than 80 percent of the entries of the newest backup after allowing for the memories the trash purge removed since (summary `refused`, the old one stays). Not batched, it is a few queries per 500 memories. | n/a |
-| `purge_trash` | Memories trashed more than 14 days (exactly 14 days stays). Deletes rows, tags, keys, links, versions, FTS rows and the vectors (ids worked out from the key rows). | 4 per 100 memories |
+| `purge_trash` | Memories trashed more than 14 days (exactly 14 days stays). Deletes rows, tags, keys, links, link rejections, versions, FTS rows and the vectors (ids worked out from the key rows). | 4 per 100 memories |
 | `reindex` | `reindex()` in batches of up to 50, sized from what is left. | about n + 8 |
 | `classify` | `classifyKind` for live memories with no kind, 4 at a time. Gives up after the first group fails. | 3 each |
 | `merge` | Live captures from the last 14 days that are not pinned, not canonical and not pending. Neighbours come from `write/neighbours.js` at 0.90 similarity or more with a word overlap of 0.45 or more (shared words over all the words of both), and must be older live captures of the same project, not pinned, not canonical and not pending. The newer one closes into the older with `store.supersede(..., "merge")`. When the vector search finds nothing, an older live capture with exactly the same name and a word overlap of 0.85 is the fallback. A cursor in `meta.merge_cursor` keeps the place, oldest first, and is cleared when a sweep ends. | measured from the candidates before it, 10 until one is measured |
@@ -543,9 +555,9 @@ Retirements go through `store.softDelete`, so they keep a version and the memory
 ## Export format v2 and import
 
 `GET /export` (admin or browser) returns `{ok, format: 2, created_at, schema_version, total, offset, next_offset, entries, versions,
-questions, links, devices}`. `entries` are the raw `memories` columns plus `tags`, trashed and closed memories included, ordered by
+questions, links, link_rejections, devices}`. `entries` are the raw `memories` columns plus `tags`, trashed and closed memories included, ordered by
 `created_at, id`. `versions` are `{memory_id, seq, snapshot, reason, created_at}` with the snapshot text as stored. `questions` are
-the model written question keys, also those of trashed memories (they cost model calls to rebuild). `links` and `devices` (`id, label, token_hash, created_at,
+the model written question keys, also those of trashed memories (they cost model calls to rebuild). `links` (`source_id, target_id, link_type, created_at, made_by, confidence`), `link_rejections` (`source_id, target_id, link_type, created_at`) and `devices` (`id, label, token_hash, created_at,
 last_used_at, revoked_at`, hash only, never a token) come with the last page. Without `limit` everything is returned up to
 3,000 entries, above that the reply is 413 `export_too_large` and says to page with `offset` and `limit` (up to 1,000). A page can also
 start at `cursor=start` (or at a `cursor` from an earlier page's `next_cursor`), and then the reply gives `next_cursor`, not
@@ -555,10 +567,10 @@ paging still works, and a purge between its pages moves rows. The nightly backup
 `POST /import` (admin only) takes a v2 document with `offset` and `limit` (up to 200). A body without `format: 2` is the old Worker's
 shape and takes the v1 path unchanged. Per memory one D1 batch writes the row, tags, versions, questions and the FTS row, so a
 memory is stored whole or not at all. An id that exists is skipped whole, which makes a second import change nothing. The reply is
-`{ok, format: 2, imported, skipped, versions, questions, links, devices, errors, next_offset, remaining}`. Links and devices go in
-with the page that reaches the end of `entries`. A device with a `token` field, or a `token_hash` that is not 64 hex characters, is
+`{ok, format: 2, imported, skipped, versions, questions, links, link_rejections, devices, errors, next_offset, remaining}`. Links, link rejections and devices go in
+with the page that reaches the end of `entries`. A link without `made_by` or `confidence`, and a document without `link_rejections`, are from an older backup and take the defaults (a user link, no confidence, no rejections). A `made_by` other than `user` or `system` is 400. A device with a `token` field, or a `token_hash` that is not 64 hex characters, is
 refused. Search keys and vectors are not in the format: after the last page call `/admin/reindex` until `remaining` is 0.
-The body limit is 10 MB, so a larger export is cut into several documents (entries and their versions together, links and devices
+The body limit is 10 MB, so a larger export is cut into several documents (entries and their versions together, links, link rejections and devices
 in the last one).
 
 ## Backup routes

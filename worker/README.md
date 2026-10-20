@@ -2,7 +2,7 @@
 
 The Cloudflare Worker behind anymem. Plain JavaScript ES modules. No dependencies, no bundler, no build step. The code that runs is the code you read. Types are written as JSDoc comments.
 
-Version 2.0.4 (`version.js` and `package.json` agree). It holds auth, the audit trail, device tokens, health and stats, storage and history of memories, search, the write pipeline, extract, the capsule, the dashboard, the nightly job, backups and import. [ARCHITECTURE.md](ARCHITECTURE.md) says how each part works. The people who use anymem never run anything in this folder. `setup.py` uploads these files, see [docs/install.md](../docs/install.md).
+Version 2.0.5 (`version.js` and `package.json` agree). It holds auth, the audit trail, device tokens, health and stats, storage and history of memories, search, the write pipeline, extract, the capsule, the dashboard, the nightly job, backups and import. [ARCHITECTURE.md](ARCHITECTURE.md) says how each part works. The people who use anymem never run anything in this folder. `setup.py` uploads these files, see [docs/install.md](../docs/install.md).
 
 ## Test
 
@@ -80,7 +80,9 @@ Every route needs the Access JWT (unless `REQUIRE_ACCESS` is false) and then a b
 | `GET /entry`, `GET /list`, `GET /history` | any, browser | read memories |
 | `GET /recall` | any, browser | search |
 | `POST /capture` | any, browser write for profile and person notes only | the write pipeline |
-| `POST /update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link` | any, browser write | change memories. History is kept on every change |
+| `POST /update`, `/append`, `/status`, `/forget`, `/restore`, `/undo` | any, browser write | change memories. History is kept on every change |
+| `POST /link`, `POST /unlink` | any, browser write | `{source_id, target_id, type}`. `type` is one of `about`, `part_of`, `owns`, `affects`, `decided`, `contradicts`, `about_person`, `related` (`supersedes` and `derived_from` are the system's, 400 `reserved_link_type`). `/unlink` replies `{ok, removed}`. A device token may remove only a user link, not a system link (403 `admin_only`) |
+| `GET /links` | any, browser | `?id=` returns the links of a memory in both directions with `made_by` and `confidence` |
 | `POST /extract` | any | `{transcript, known, max}` returns `{proposals}` and stores nothing |
 | `GET /prompt-capsules/core` | any, browser | the capsule, with an ETag and 304 |
 | `GET /export` | admin, browser | the whole store in format 2, or a page of it. A browser login gets it without the device `token_hash` values |

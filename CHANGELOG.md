@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.0.5] 2026-10-20
+
+Links between memories get a closed list of types, a record of who made each link, and a way to take one back. This is the first step toward grouping memories by subject, and nothing recalls or ranks by a link yet.
+
+1. **Types.** A link is `about`, `part_of`, `owns`, `affects`, `decided`, `supersedes`, `contradicts`, `derived_from`, `about_person` or `related`. A type outside the list is refused with the list in the message, and `supersedes` and `derived_from` are written by the system only. Links with any other text, made before this version, are kept and shown as `related`. Migration 0005.
+2. **Unlink.** `POST /unlink` removes a link. When the system made it, the removal is remembered so the system does not make that link again. A device token can remove only links a person made, and no device can add or remove a link on a memory that holds capsule tags or the canonical status.
+3. **Reading links.** `GET /links?id=` lists the links of a memory, both directions, grouped by type in the scripts. New scripts `unlink.py` and `links.py`, and `link.py` checks the type before it sends.
+4. **Dashboard.** The memory drawer shows its links grouped by type, with add, remove, and a "Not this" button on a link the system made.
+5. **Backup.** Export and import carry who made a link, how sure the system was, and the removed links. An older backup still imports.
+
 ## [2.0.4] 2026-10-20
 
 The nightly job's limits are settings now. They were fixed at the Free plan's 40 subrequests and 20 seconds a step, so on a Paid store the backup took 17 of the 40 and the reindex got a handful of memories a night while the merge step got none. `NIGHTLY_SUBREQUESTS` and `NIGHTLY_WALL_MS` set them, the defaults are unchanged, and `setup.py` sets 400 and 120 seconds when the plan is Paid. A store that already runs needs the two settings added to the Worker, or a rerun of `setup.py --plan paid`.

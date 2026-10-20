@@ -19,7 +19,7 @@ Output goes to standard out and one line of trouble goes to standard error. Exit
 | `get.py`, `list.py`, `history.py` | read one memory, browse, show its changes |
 | `append.py`, `update.py`, `status.py` | change a memory |
 | `forget.py`, `restore.py`, `undo.py` | trash, bring back, revert |
-| `link.py` | relate two memories |
+| `link.py`, `unlink.py`, `links.py` | link two memories, remove a link, list a memory's links |
 | `profile.py`, `person.py` | the person's own facts, and the people they talk about |
 | `usage.py` | what memory adds to prompts |
 | `backup.py` | a local copy of the store |
@@ -66,7 +66,7 @@ history.py ID [--json]
 
 `get.py` prints one memory in full, a past state with `--version`, a trashed one with `--deleted`. `list.py` is newest first, `-n` defaults to 20 and goes up to 500, and `--deleted` shows the trash of the last 14 days. Origins are `explicit`, `capture`, `profile`, `person`, `system` and `import`. `history.py` prints one line per change, newest first.
 
-### append.py, update.py, status.py, forget.py, restore.py, undo.py, link.py
+### append.py, update.py, status.py, forget.py, restore.py, undo.py, link.py, unlink.py
 
 ```
 append.py ID [TEXT]
@@ -75,10 +75,19 @@ status.py ID canonical|active|deprecated|pending
 forget.py ID
 restore.py ID
 undo.py ID
-link.py SOURCE TARGET [--type WORD]
+link.py SOURCE TARGET [TYPE]
+unlink.py SOURCE TARGET TYPE
 ```
 
-Each is one Worker call. `forget.py` moves a memory to the trash for 14 days and `restore.py` brings it back in that time. `undo.py` reverts the last change, again to go forward, and reopens a memory a newer one replaced. `update.py` with `--tag` replaces the whole tag list, and `--if-updated-at` refuses the write when the memory changed since. `link.py` makes an explicit link, the type defaults to `related`. `draft` is not a status.
+Each is one Worker call. `forget.py` moves a memory to the trash for 14 days and `restore.py` brings it back in that time. `undo.py` reverts the last change, again to go forward, and reopens a memory a newer one replaced. `update.py` with `--tag` replaces the whole tag list, and `--if-updated-at` refuses the write when the memory changed since. `link.py` makes an explicit link. The type is one of `about`, `part_of`, `owns`, `affects`, `decided`, `contradicts`, `about_person` and `related`, and defaults to `related`. `--type TYPE` works too. Another word is refused with the list, and so are `supersedes` and `derived_from`, which only the system writes. `unlink.py` removes one link and prints `removed` or `no such link`. When the link was made by the system it is also remembered, so the system never makes it again, and a device token may not remove one (use the admin token or the dashboard). `draft` is not a status.
+
+### links.py
+
+```
+links.py ID [--json]
+```
+
+One line per link, grouped by type: `type  out|in  other_id  other_name`. `out` means this memory is the source, `in` means it is the target. Memories in the trash are not listed. A type outside the list, left by an older version, shows as `related`. `no links` when there are none.
 
 ### backup.py
 
