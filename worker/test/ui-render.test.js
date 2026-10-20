@@ -11,6 +11,8 @@ import { auditRows, stripView } from "../ui/screens/audit.js";
 import { backupsView, capacityView, capturesView, checksView, countsView, limitView, runsView } from "../ui/screens/health.js";
 import { askView, figuresView, growthView, headView, latestView, probationView, quietView, recallsView, sourcesView, statusView, toolRows, toolsView, toolTable, usageView } from "../ui/screens/home.js";
 import { pendingView, peopleView, profileView } from "../ui/screens/people.js";
+import { listView as subjectListView, newForm, tableRow as subjectRow } from "../ui/screens/subjects.js";
+import { aliasForm, briefForm, fieldsForm, subjectView } from "../ui/lib/subject-drawer.js";
 import { hitView, injectedView, resultsView, rulesView, searchForm } from "../ui/screens/search.js";
 import { entryView, feedView, summaryView } from "../ui/screens/activity.js";
 import { trashView } from "../ui/screens/trash.js";
@@ -53,6 +55,24 @@ const entry = (t, over = {}) => ({
   created_at: NOW - 100_000,
   updated_at: NOW - 50_000,
   deleted_at: null,
+  ...over,
+});
+
+/** A subject card as GET /subject returns it, every text field from the given set. */
+const subject = (t, over = {}) => ({
+  id: "33333333-aaaa-bbbb-cccc-444444444444",
+  slug: "pip",
+  kind: "pet",
+  status: "active",
+  scope: "private",
+  name: t.script,
+  aliases: [t.quote, t.attr],
+  fields: { name: { value: t.img, confirmed_at: NOW - DAY, source: "user" }, vet: { value: t.pre, confirmed_at: NOW - 5000, source: "user" }, [t.attr]: { value: t.md, confirmed_at: NOW, source: "user" } },
+  brief: `${t.md}\n${t.pre}`,
+  member_count: 3,
+  members: [{ id: t.quote, name: t.script, updated_at: NOW - 50 }, { id: "m2", name: t.img, updated_at: NOW }],
+  created_at: NOW - 100_000,
+  updated_at: NOW - 100,
   ...over,
 });
 
@@ -153,6 +173,20 @@ function views(t) {
     ["historyView", historyView(versions, NOW)],
     ["editForm", editForm(e)],
     ["linkForm", linkForm()],
+    ["factsView with subjects", factsView(e, extras, NOW, [{ id: "c1", slug: t.quote, name: t.script }, { id: "c2", slug: "corolla", name: t.img }])],
+    ["linksView without actions", linksView(links, false)],
+    ["subjectView", subjectView(subject(t), links, NOW, t.quote)],
+    ["subjectView retired", subjectView(subject(t, { status: "retired", scope: "shared", aliases: [], fields: {}, brief: "" }), null, NOW, "#/subjects")],
+    ["subjectView capped members", subjectView(subject(t, { member_count: 300 }), [], NOW, "#/subjects")],
+    ["subjectView no members", subjectView(subject(t, { members: [], member_count: 0 }), [], NOW, "#/subjects")],
+    ["briefForm", briefForm(subject(t))],
+    ["fieldsForm", fieldsForm(subject(t))],
+    ["aliasForm", aliasForm()],
+    ["newForm", newForm()],
+    ["subjectRow", subjectRow(subject(t), NOW, true, { kind: t.script })],
+    ["subjects listView", subjectListView([subject(t), subject(t, { slug: "corolla", status: "stale", scope: "shared", aliases: [] })], NOW, "pip", { kind: t.script, status: t.img, scope: t.quote, q: t.attr, sort: t.md })],
+    ["subjects listView empty", subjectListView([], NOW, "", {})],
+    ["subjects listView none match", subjectListView([], NOW, "", { q: t.quote })],
     ["detailView", detailView(e, { versions, extras, links }, NOW)],
     ["detailView trashed", detailView(entry(t, { deleted_at: NOW - 5 * DAY }), { versions, extras, links: null }, NOW)],
     ["detailView closed", detailView(entry(t, { valid_until: NOW - 5, superseded_by: t.quote }), { versions, extras, links: null }, NOW)],
@@ -198,7 +232,7 @@ test("no view lets store text add a tag or an attribute", () => {
   const nasty = views(EVIL);
   const benign = views(BENIGN);
   assert.equal(nasty.length, benign.length);
-  assert.ok(nasty.length >= 63, `${nasty.length} views are covered`);
+  assert.ok(nasty.length >= 78, `${nasty.length} views are covered`);
   nasty.forEach(([name, view], i) => {
     const got = parse(String(view), name);
     assert.deepEqual(got, parse(String(benign[i][1]), name), `${name} has different tags or attributes with hostile text`);
@@ -493,4 +527,68 @@ test("the pending list says when it shows only the first page of the changes wai
   assert.match(shown, /503 changes waiting for you/, "the heading counts every change, the same as the sidebar");
   assert.match(shown, /Showing the first 1 of 503\. Accept or dismiss these to see the rest\./);
   assert.doesNotMatch(String(pendingView([pending], {}, NOW, 1)), /Showing the first/, "a full page says nothing");
+});
+
+test("a subject card shows its brief and fields as typed text, the fields with when they were confirmed", () => {
+  const out = String(subjectView(subject(EVIL), [], NOW, "#/subjects"));
+  assert.ok(out.includes("**bold** [click](javascript:alert(1))"), "the brief is shown as typed, never rendered");
+  assert.match(out, /<pre class="text" role="region" aria-label="Brief" tabindex="0">\*\*bold\*\*/);
+  assert.ok(out.includes("&lt;script&gt;alert(1)&lt;/script&gt;"));
+  assert.doesNotMatch(out, /href="https?:/);
+  const pip = String(subjectView(subject(BENIGN, { fields: { vet: { value: "Dr Dana", confirmed_at: NOW - 2 * DAY, source: "user" }, health_note: { value: "none", confirmed_at: NOW, source: "user" } } }), [], NOW, "#/subjects"));
+  assert.match(pip, /<dt>Vet<\/dt><dd>Dr Dana<span class="cell__sub" title="[^"]+">confirmed 2 days ago<\/span>/);
+  assert.match(pip, /<dt>Health note<\/dt>/, "a key is shown by its label");
+});
+
+test("a subject card has the four buttons, a scope toggle, and the members as a table whose rows open the memory", () => {
+  const out = String(subjectView(subject(BENIGN, { scope: "shared" }), [{ type: "about", direction: "in", other_id: "m2", other_name: "pip-vet", made_by: "user", confidence: null }], NOW, "#/subjects"));
+  for (const label of ["Edit brief", "Edit fields", "Add alias", "Retire"]) assert.match(out, new RegExp(`>${label}</button>`), label);
+  assert.match(out, /<input type="radio" name="subject-scope" value="shared" data-change="subject-scope" checked>/);
+  assert.match(out, /<input type="radio" name="subject-scope" value="private" data-change="subject-scope" >/);
+  assert.match(out, /<tr data-id="m2"><th scope="row" class="mem__cell"><a class="mem__title" href="#\/memories\/m2">plain<\/a>/);
+  assert.match(out, /Linked from <a href="#\/memories\/m2">pip-vet<\/a>/, "the links of the card are the memory drawer's Links section");
+  assert.doesNotMatch(out, /data-action="unlink"/, "and they are changed on the memory, not here");
+  assert.match(String(linksView([{ type: "about", direction: "out", other_id: "m2", other_name: "x", made_by: "user" }])), /data-action="unlink"/, "the memory drawer keeps its buttons");
+  assert.match(String(subjectView(subject(BENIGN, { member_count: 300 }), [], NOW, "#/subjects")), /Showing the newest 2 memories of 300 memories\./);
+  assert.match(String(subjectView(subject(BENIGN, { members: [], member_count: 0 }), [], NOW, "#/subjects")), /No memory is about this subject yet\./);
+});
+
+test("a retired subject says so and offers to bring it back instead of Retire", () => {
+  const out = String(subjectView(subject(BENIGN, { status: "retired" }), [], NOW, "#/subjects"));
+  assert.match(out, /This subject is retired\. Recall does not offer a retired subject\./);
+  assert.match(out, /data-status="active">Bring back</);
+  assert.doesNotMatch(out, /data-status="retired"/);
+});
+
+test("the fields form offers the keys of the subject's kind and never one of another kind", () => {
+  const names = (kind) => [...String(fieldsForm(subject(BENIGN, { kind, fields: {} }))).matchAll(/<input name="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(names("person"), ["relationship", "known_as", "work", "contact", "birthday"]);
+  assert.deepEqual(names("pet"), ["name", "species", "breed", "born", "vet", "status", "health_note"]);
+  assert.deepEqual(names("topic"), ["what"]);
+  assert.deepEqual(names("nonsense"), []);
+  assert.match(String(fieldsForm(subject(BENIGN))), /<input name="vet" value="plain" maxlength="200"/);
+});
+
+test("the new subject form asks for kind, name, slug and brief, and the slug has the Worker's rule", () => {
+  const out = String(newForm());
+  assert.deepEqual([...out.matchAll(/<option value="([^"]+)">/g)].map((m) => m[1]), ["person", "pet", "asset", "project", "area", "topic"]);
+  for (const name of ["name", "slug", "brief"]) assert.match(out, new RegExp(`name="${name}"`), name);
+  assert.match(out, /name="slug" required minlength="2" maxlength="40" pattern="\[a-z0-9\]\+\(-\[a-z0-9\]\+\)\*"/);
+});
+
+test("the subjects table has a column for name, kind, status, scope, members and changed, and says why it is empty", () => {
+  const out = String(subjectListView([subject(BENIGN)], NOW, "", {}));
+  for (const head of ["Subject", "Kind", "Status", "Scope", "Members", "Changed"]) assert.match(out, new RegExp(`<th scope="col" class="th[^"]*"[^>]*>(<span class="th__row">)?(<button[^>]*>)?${head}`), head);
+  assert.match(out, /href="#\/subjects\?subject=pip"/);
+  assert.match(out, /<td class="num">3<\/td>/);
+  assert.match(String(subjectListView([], NOW, "", {})), /No subjects yet/);
+  assert.match(String(subjectListView([], NOW, "", { kind: "pet" })), /No subjects match[\s\S]*Clear the filters/);
+  assert.match(String(subjectListView([], NOW, "", { kind: "pet" })), /<th scope="col" class="th"><span class="th__row">Kind/, "the headers stay, they hold the filters");
+  assert.match(String(subjectRow(subject(BENIGN, { aliases: ["pippa"] }), NOW, false, {})), /pip, also called pippa/);
+});
+
+test("the memory drawer shows the subjects a memory is about as chips that open the subject", () => {
+  const out = String(factsView(entry(BENIGN), null, NOW, [{ id: "c1", slug: "pip", name: "Pip" }]));
+  assert.match(out, /<dt>Subjects<\/dt><dd><ul class="tags" aria-label="Subjects"><li><a href="#\/subjects\?subject=pip">Pip<\/a><\/li><\/ul>/);
+  assert.doesNotMatch(String(factsView(entry(BENIGN), null, NOW)), /Subjects/, "a memory about nothing has no Subjects row");
 });

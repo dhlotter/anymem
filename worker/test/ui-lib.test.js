@@ -7,7 +7,8 @@ import { against, ago, compact, count, daysLeftLabel, formatBytes, formatNumber,
 import { appendPage, auditQuery, listQuery, parseLocalTime, recallQuery, splitTags } from "../ui/lib/filters.js";
 import { arms, closeness, heldBack, hookQuery, injectedHits, injectedText, parseEntry, rareWords, ruleSplit } from "../ui/lib/relevance.js";
 import { findProfile, parseFacts, pendingCurrent, pendingField, pendingValue, personLines, renderFacts, setFact, tagsFor } from "../ui/lib/profile.js";
-import { hashFor, memoryLink, parseHash } from "../ui/lib/route.js";
+import { hashFor, memoryLink, NAV, parseHash } from "../ui/lib/route.js";
+import { fieldLabel, FIELD_KEYS, KINDS, sortSubjects, subjectHref, subjectQuery, subjectsOf, validSlug } from "../ui/lib/subjects.js";
 import { redoUndo } from "../ui/lib/drawer.js";
 import { ApiError, describeError, isMissingRoute, request } from "../ui/lib/api.js";
 import { backupItems } from "../ui/screens/health.js";
@@ -336,4 +337,44 @@ test("request turns failures into readable errors", async () => {
   assert.match(describeError(new ApiError(403, "csrf_rejected", "x")), /Reload and try again/);
   assert.equal(describeError(new ApiError(500, "internal", "Boom")), "Boom");
   assert.equal(describeError(new Error("x")), "Something went wrong in the page.");
+});
+
+test("Subjects sits in the sidebar right after People, and its address keeps the filters and the open subject", () => {
+  const names = NAV.map((n) => n.name);
+  assert.equal(names[names.indexOf("people") + 1], "subjects");
+  assert.equal(parseHash("#/subjects?kind=pet&subject=pip").name, "subjects");
+  assert.equal(subjectHref("pip", { kind: "pet", sort: "" }), "#/subjects?kind=pet&subject=pip");
+  assert.equal(subjectHref("pip"), "#/subjects?subject=pip");
+});
+
+test("the subject helpers: slug rule, field labels, the query, and every kind has its fields", () => {
+  for (const ok of ["pip", "the-corolla", "a1", "x".repeat(40)]) assert.equal(validSlug(ok), true, ok);
+  for (const bad of ["p", "x".repeat(41), "Pip", "pip-", "-pip", "pip--dog", "pip dog", "pip_dog", ""]) assert.equal(validSlug(bad), false, bad);
+  assert.equal(fieldLabel("known_as"), "Known as");
+  assert.equal(fieldLabel("health_note"), "Health note");
+  assert.deepEqual(Object.keys(FIELD_KEYS), KINDS);
+  assert.equal(subjectQuery({ kind: "pet", status: "", q: "pip dog", sort: "name" }), "kind=pet&q=pip+dog", "empty filters and the sort are not sent, the page sorts");
+  assert.equal(subjectQuery({}), "");
+});
+
+test("sortSubjects: name from A, members and changed from most, a tie keeps the Worker's order", () => {
+  const list = [{ name: "Corolla", member_count: 2, updated_at: 5 }, { name: "alpha", member_count: 2, updated_at: 9 }, { name: "Pip", member_count: 7, updated_at: 1 }];
+  const names = (sort) => sortSubjects(list, sort).map((s) => s.name);
+  assert.deepEqual(names("name"), ["alpha", "Corolla", "Pip"], "case does not matter");
+  assert.deepEqual(names("members"), ["Pip", "Corolla", "alpha"], "the tie on 2 keeps the order it came in");
+  assert.deepEqual(names("updated"), ["alpha", "Corolla", "Pip"]);
+  assert.deepEqual(names(undefined), names("updated"), "changed is the default");
+  assert.deepEqual(names("nonsense"), ["Corolla", "alpha", "Pip"], "an unknown sort leaves the order alone");
+  assert.equal(list[0].name, "Corolla", "the input is not reordered");
+});
+
+test("subjectsOf finds the cards a memory is about, from its outgoing about links only", () => {
+  const subjects = [{ id: "c1", slug: "pip", name: "Pip" }, { id: "c2", slug: "corolla", name: "Corolla" }];
+  const link = (over) => ({ type: "about", direction: "out", other_id: "c1", ...over });
+  assert.deepEqual(subjectsOf([link(), link({ other_id: "c2" }), link()], subjects).map((s) => s.slug), ["pip", "corolla"], "each once, in link order");
+  assert.deepEqual(subjectsOf([link({ direction: "in" })], subjects), [], "a memory that is linked from a card is not about it");
+  assert.deepEqual(subjectsOf([link({ type: "related" })], subjects), [], "only about links count");
+  assert.deepEqual(subjectsOf([link({ other_id: "m9" })], subjects), [], "an about link to an ordinary memory is not a subject");
+  assert.deepEqual(subjectsOf(null, subjects), []);
+  assert.deepEqual(subjectsOf([link()], null), [], "without the list of subjects there is nothing to say");
 });

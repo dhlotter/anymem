@@ -38,6 +38,9 @@ const ANSWERS = {
   "/list": () => ({ entries: [], next_cursor: null }),
   "/health": () => ({ version: "2.0.2" }),
   "/entry": (path) => ({ ok: true, entry: { id: new URL(`http://x${path}`).searchParams.get("id"), name: "a-note", content: "---\nname: a-note\n---\nText.", tags: [], origin: "explicit", harness: "", status: "active", project: "", type: "", kind: "semantic", pinned: 0, recall_count: 0, last_recalled_at: null, valid_from: NOW, valid_until: null, created_at: NOW, updated_at: NOW, deleted_at: null, superseded_by: null } }),
+  "/subjects": () => ({ ok: true, subjects: [{ id: "c1", slug: "pip", kind: "pet", status: "active", scope: "shared", name: "Pip", aliases: [], fields: {}, member_count: 1, updated_at: NOW }] }),
+  "/subject": () => ({ ok: true, subject: { id: "c1", slug: "pip", kind: "pet", status: "active", scope: "shared", name: "Pip", aliases: [], fields: {}, member_count: 1, updated_at: NOW, created_at: NOW, brief: "A small dog.", members: [{ id: "a1", name: "pip-vet", updated_at: NOW }] } }),
+  "/links": () => ({ ok: true, links: [] }),
   "/history": () => ({ ok: true, versions: [] }),
   "/ui/api/memory-extras": () => ({ ok: true, probation_until: null, purge_at: null, links: [], recalled_by: [], recall_log_since: null }),
 };
@@ -83,4 +86,16 @@ test("the page script mounts the screen each address names, and an unknown addre
   await go("#/memories/a2");
   assert.equal(screen(), "screen screen--memories", "a memory address on the same screen keeps the screen");
   assert.match(main.querySelector(".mem__panel").textContent, /a-note/);
+  await go("#/subjects");
+  assert.equal(screen(), "screen screen--subjects", "Subjects is a screen");
+  assert.equal(doc.title, "Subjects, anymem");
+  assert.match(main.textContent, /Pip/, "the subject is in the table");
+  assert.equal(doc.getElementById("nav").querySelector('a[data-screen="subjects"]').textContent, "Subjects", "and in the sidebar");
+  await go("#/subjects?subject=pip");
+  assert.equal(screen(), "screen screen--subjects", "a subject address keeps the screen");
+  assert.match(main.querySelector('.mem__panel[aria-label="Subject"]').textContent, /A small dog\./, "and opens the subject in its drawer");
+  const member = main.querySelector('.mem__panel a[href="#/memories/a1"]');
+  assert.ok(member, "a member links to its memory");
+  member.dispatchEvent(new Event("click"));
+  assert.equal(globalThis.location.hash, "#/subjects/a1?subject=pip", "a memory link on Subjects opens the memory drawer there, with the subject kept");
 });

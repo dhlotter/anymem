@@ -220,11 +220,12 @@ h1 { font: 700 var(--text-xl)/1.1 var(--font-display); letter-spacing: 0.005em; 
 .decide { margin-bottom: var(--space-xl); }
 .decision__was { color: var(--color-muted); text-decoration: line-through; text-decoration-thickness: 1px; overflow-wrap: anywhere; }
 .decision__is { color: var(--color-ink); overflow-wrap: anywhere; }
-.data--profile, .data--people { table-layout: fixed; width: 100%; min-width: 0; }
+.data--profile, .data--people, .data--members { table-layout: fixed; width: 100%; min-width: 0; }
 .data--profile th:nth-child(1) { width: 12rem; }
 .data--profile th:nth-child(3) { width: 12rem; }
 .data--people th:nth-child(1) { width: 14rem; }
 .data--people th:nth-child(3) { width: 9rem; }
+.data--members th:nth-child(2) { width: 9rem; }
 .data--decide td.decision__was { color: var(--color-muted); text-decoration: line-through; text-decoration-thickness: 1px; }
 .data--decide td.cell__act { text-align: right; }
 

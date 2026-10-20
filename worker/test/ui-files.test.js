@@ -13,7 +13,7 @@ const scripts = all.filter((f) => f.name.endsWith(".js"));
 test("the dashboard is plain files of three kinds, and every screen has its own module", () => {
   assert.ok(all.length >= 20);
   for (const f of all) assert.match(f.name, /\.(html|js|css)$/, f.name);
-  for (const screen of ["home", "search", "memories", "activity", "trash", "capsule", "people", "health", "audit"]) assert.ok(all.some((f) => f.name === `screens/${screen}.js`), screen);
+  for (const screen of ["home", "search", "memories", "activity", "trash", "capsule", "people", "subjects", "health", "audit"]) assert.ok(all.some((f) => f.name === `screens/${screen}.js`), screen);
   for (const f of scripts.filter((s) => s.name.startsWith("screens/"))) {
     assert.match(f.text, /export const title = /, `${f.name} has no title`);
     assert.match(f.text, /export function mount\(/, `${f.name} has no mount`);
