@@ -59,7 +59,7 @@ ENTRY = {"id": ID, "name": "tabs-over-spaces", "description": "d", "status": "ac
 LISTING = {"ok": True, "entries": [ENTRY, {**ENTRY, "id": ID2, "name": "other"}], "next_cursor": None}
 
 # every job has its script, and the retired files are gone
-JOBS = "recall remember get list append update status forget restore undo history link profile person usage backup devices doctor setup connect init install uninstall".split()
+JOBS = "recall remember get list append update status forget restore undo history link unlink links profile person usage backup devices doctor setup connect init install uninstall".split()
 check("one script per job", all((SCRIPTS / f"{j}.py").exists() for j in JOBS))
 check("the retired commands and files are gone", not any((ROOT / p).exists() for p in ("bin/anymem", "bin/mcp-headers", "bin/anymem-backup", "client/hm/commands/promote.py", "client/hm/commands/reject.py",
       "client/hm/commands/review.py", "client/hm/commands/_conflicts.py", "client/hm/commands/tidy.py")) and not (SCRIPTS / "promote.py").exists())
@@ -161,6 +161,50 @@ for script, args, path, body in (
     srv.replies[f"POST {path}"] = (200, {"ok": True, "entry": ENTRY, "created": True})
     rc, out, err = run(script, *args)
     check(f"{script} posts {path} with the full id", rc == 0 and last()[1] == path and last()[2] == body)
+# links: the fake Worker keeps them, so the three scripts are checked against each other
+ID3 = "5a5a5a5a-1111-4222-8333-444455556666"
+srv.replies.pop("POST /link")
+srv.names.update({ID: "pip-the-dog", ID2: "the-corolla", ID3: "project-alpha"})
+rc, out, err = run("link", ID, ID2)
+check("link with no type sends related", rc == 0 and last()[2] == {"source_id": ID, "target_id": ID2, "type": "related"} and out.strip() == "linked")
+rc, out, err = run("link", ID, ID2, "owns")
+check("link takes the type as a third word", rc == 0 and last()[2]["type"] == "owns")
+rc, out, err = run("link", ID, ID2, "owns")
+check("linking again says already linked", rc == 0 and out.strip() == "already linked")
+for bad in ("likes", "Owns"):
+    rc, out, err = run("link", ID, ID2, bad)
+    check(f"link refuses {bad} before sending, exit 2, and lists the types", rc == 2 and srv.requests == [] and "about_person" in err and "related" in err and bad in err)
+for reserved in ("supersedes", "derived_from"):
+    rc, out, err = run("link", ID, ID2, "--type", reserved)
+    check(f"link refuses {reserved} before sending, it is the system's", rc == 2 and srv.requests == [] and "system" in err)
+srv.replies["POST /link"] = (400, {"ok": False, "error": "Link type must be one of: about", "code": "bad_link_type"})
+rc, out, err = run("link", ID, ID2, "owns")
+check("a Worker refusal of the type is one plain line and exit 1", rc == 1 and "Link type must be one of" in err and "Traceback" not in err)
+srv.replies.pop("POST /link")
+srv.links.append({"source_id": ID3, "target_id": ID, "type": "decided", "made_by": "system", "confidence": 0.8, "created_at": 50})
+srv.links.append({"source_id": ID, "target_id": ID3, "type": "old free text", "made_by": "user", "confidence": None, "created_at": 40})
+rc, out, err = run("links", ID)
+rows = [r.split("  ") for r in out.splitlines()]
+check("links reads GET /links with the full id", last()[0] == "GET" and query(last()[1])["id"] == [ID])
+check("links prints type, direction, other id and name, one line each", ["decided", "in", ID3, "project-alpha"] in rows and ["owns", "out", ID2, "the-corolla"] in rows)
+check("links shows a type outside the list as related, grouped with the related ones", [r[0] for r in rows] == ["decided", "owns", "related", "related"] and rows[2][1:3] == ["out", ID3] and rows[3][1:3] == ["out", ID2])
+rc, out, err = run("links", ID, "--json")
+check("links --json prints the reply", json.loads(out)["links"][0]["made_by"] == "system")
+rc, out, err = run("links", ID3[:8] + "x" * 24)
+check("a memory with no links says so", rc == 0 and out.strip() == "no links")
+rc, out, err = run("unlink", ID, ID2, "owns")
+check("unlink posts /unlink with the full ids and says removed", rc == 0 and last()[1] == "/unlink" and last()[2] == {"source_id": ID, "target_id": ID2, "type": "owns"} and out.strip() == "removed")
+rc, out, err = run("unlink", ID, ID2, "owns")
+check("unlinking a link that is not there says so", rc == 0 and out.strip() == "no such link")
+rc, out, err = run("unlink", ID3, ID, "decided")
+check("unlinking a system link removes it and the Worker records the rejection", out.strip() == "removed" and srv.rejections == [(ID3, ID, "decided")])
+rc, out, err = run("links", ID)
+check("the removed links are gone from links", "owns" not in out and "decided" not in out)
+srv.replies["POST /unlink"] = (403, {"ok": False, "error": "Only the admin token may remove a link the system made.", "code": "admin_only"})
+rc, out, err = run("unlink", ID3, ID, "decided")
+check("a refused unlink is one plain line and exit 1", rc == 1 and "admin token" in err and "Traceback" not in err)
+srv.replies.pop("POST /unlink")
+
 rc, out, err = run("update", ID, "--tag", "a", "--tag", "b")
 check("update with only --tag sends only tags", last()[2] == {"id": ID, "tags": ["a", "b"]})
 rc, out, err = run("update", ID)
