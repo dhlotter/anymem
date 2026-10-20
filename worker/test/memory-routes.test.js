@@ -127,6 +127,19 @@ test("a device capture with the name of a protected capture memory is stored as 
   assert.match(kept.content, /original text/);
 });
 
+test("a device token cannot add a link to a memory that holds capsule tags or the canonical status", async () => {
+  const app = await createApp();
+  const { token } = (await post(app, "/devices", { label: "laptop" })).json;
+  const core = (await post(app, "/capture", { content: "core identity note", origin: "system", tags: ["capsule:core", "capsule-slot:identity", "status:canonical"] })).json.id;
+  const plain = (await capture(app, "a plain memory about the dog Pip")).id;
+  const refused = await post(app, "/link", { source_id: plain, target_id: core, type: "related" }, { token });
+  assert.equal(refused.status, 403);
+  assert.equal(refused.json.code, "admin_only");
+  const refusedOther = await post(app, "/link", { source_id: core, target_id: plain, type: "related" }, { token });
+  assert.equal(refusedOther.status, 403);
+  assert.equal((await post(app, "/link", { source_id: plain, target_id: core, type: "related" })).status, 200, "the admin token may link it");
+});
+
 test("a browser login may still save profile and person notes, and the capsule tags", async () => {
   const app = await createApp();
   const jwt = app.browserJwt("me@example.com");

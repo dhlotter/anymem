@@ -164,7 +164,8 @@ export async function history({ env, url, now, memoryIds }) {
 }
 
 /** POST /link {source_id, target_id, type}. The type is one of LINK_TYPES, and the two the system writes are refused. */
-export async function link({ request, env, now, maxBody, memoryIds }) {
+export async function link(c) {
+  const { request, env, now, maxBody, memoryIds } = c;
   const body = await readJson(request, maxBody);
   const source = idOf(body.source_id);
   const target = idOf(body.target_id);
@@ -172,6 +173,8 @@ export async function link({ request, env, now, maxBody, memoryIds }) {
   const type = typeof body.type === "string" ? body.type.trim().toLowerCase() : body.type;
   if (!LINK_TYPES.includes(type)) throw badRequest(`type must be one of ${LINK_TYPES.join(", ")}.`, "bad_link_type");
   if (RESERVED_LINK_TYPES.includes(type)) throw badRequest(`${type} is written by the system only. Use one of ${LINK_TYPES.filter((t) => !RESERVED_LINK_TYPES.includes(t)).join(", ")}.`, "reserved_link_type");
+  await guardDevice(c, source);
+  await guardDevice(c, target);
   const { created } = await createStore(env.DB, now).link(source, target, type);
   return json({ ok: true, created });
 }
