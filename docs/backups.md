@@ -46,6 +46,15 @@ There is no restore script. A restore is the Worker's `POST /import` into an emp
 
 `migration/migrate_v1_to_v2.py load DOCUMENT.json` does both steps. It reads an uncompressed document, so gunzip the backup first. It needs `TARGET_URL` and `TARGET_TOKEN`, and `TARGET_ACCESS_CLIENT_ID` and `TARGET_ACCESS_CLIENT_SECRET` when the target is behind Access. Three things to know. It sends 50 entries per page. It sends the question keys that the document holds. A document made by the converter from the old Worker has none, so for that one run `migrate_v1_to_v2.py questions` afterwards to write them. And it refuses the host named in `ANYMEM_LIVE_HOST`, because it was written for a rehearsal, so it cannot restore into that host.
 
+### Subjects for the people you already have
+
+`node scripts/subjects-from-people.mjs` makes a subject of kind person for each person memory that has none, so an install with people from before subjects does not start them by hand. It needs `ANYMEM_URL` and the admin token in `ANYMEM_TOKEN`, and `ANYMEM_ACCESS_CLIENT_ID` and `ANYMEM_ACCESS_CLIENT_SECRET` when the Worker is behind Access. It is a dry run until you add `--apply`.
+
+1. **What it reads.** Each memory with origin `person`, named `person-<slug>`. A person called Dana, saved as `person-dana`, becomes the subject `dana`. The person memory stays as it is and is not linked, because it is already the data.
+2. **What it copies.** The Relationship, Known as, Work and Birthday lines, and the Contact line, or the Email and Phone lines joined when there is no Contact line. Nothing else is copied.
+3. **What it leaves out and says so.** A line that looks like health, money, legal or ID text, a line marked unconfirmed, and a line over 200 characters. A name that is not `person-<slug>` with a usable slug is skipped and named.
+4. **Safe to repeat.** A person whose slug already has a subject is skipped, so a second run creates nothing. One refusal from the Worker is reported and the run goes on, and the exit code is 1 if any write failed.
+
 ### What is proven
 
 1. **On invented data, in the tests.** `worker/test/backup.test.js` ends with a restore proof. It backs up a populated store, restores it into an empty one, and compares everything field by field. It also covers paged import equal to one call, a second import changing nothing, and a reindex making recall work.
