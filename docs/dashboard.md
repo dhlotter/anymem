@@ -19,6 +19,7 @@ The address bar uses hash routes, so each screen has a link you can bookmark. Fi
 | Trash | `#/trash` | Memories forgotten in the last 14 days, as a table, the closest to the end first or the newest forgotten first. Origin and project filter it, a row opens the memory in a drawer, and Restore is on each row |
 | Capsule | `#/capsule` | The text that opens every session. A size figure with a word for how full it is, a ruler of the 9,500 character cap (also where the session start hook cuts the text), a table of the sections with each one's share and the standard slots that nothing fills, and the text as the hook joins it, with Copy. A section opens its memory in a drawer, where it can be edited |
 | People | `#/people` | Changes waiting for you, one line each with the value now and the value proposed, then the profile and each person note as tables. A row opens its memory in a drawer |
+| Subjects | `#/subjects` | The things your memories are about, such as a pet, a car or a project, as a table. The Subject header filters by name or alias, Kind, Status and Scope have a funnel, and Subject, Members and Changed sort. A row opens the subject in a drawer, and New subject makes one. Described below |
 | Health | `#/health` | The checks. The nightly job as a grid of steps over the last runs. Database and vector size against the plan. The write limit by token. Captures proposed, screened out, saved and refused for 14 days. Backups with a download. Counts by status, origin, kind and project |
 | Audit | `#/audit` | The Worker's audit trail as a table, with the filter in the column headers for caller (the ones seen lately, named by the Worker), route, result and time, and calls per day. No memory text is shown |
 
@@ -41,9 +42,22 @@ The Links section lists every live link of the open memory, read from `GET /link
 2. **Made by anymem.** A link the system made is marked "made by anymem" with its confidence. Its button is Not this. It calls `POST /unlink`, which also records the refusal, so the system never makes that link again. That cannot be undone from the drawer.
 3. **Add a link.** The Link button opens a small form with the other memory's id and a type chosen from a list. The list leaves out `supersedes` and `derived_from`, which only the system writes.
 
+## Subjects
+
+A subject is a thing memories are about. Its card is an ordinary memory that holds the brief, and a row in the subjects table holds its kind, status, scope, fields and aliases. The Subjects screen reads `GET /subjects` with the kind, status, scope and name filters of the headers, sorts the answer on the page, and shows one row a subject. The address keeps the filters and the open subject, for example `#/subjects?kind=pet&subject=pip`.
+
+1. **The subject drawer.** A row opens `GET /subject` in the same kind of drawer as a memory. It shows the name and slug, the kind, status and scope, the brief as plain text (never rendered as markup), the fields each with when it was confirmed, the aliases, the members as a table, and the card memory's links in the Links section described above, without buttons. A row of the members table opens that memory in the memory drawer on top of the subject. Escape closes the memory first, and the next Escape closes the subject.
+2. **Scope.** A Shared and Private toggle sends `POST /subject/update` with the new scope. Only the admin token and a browser login may change it, and a refusal puts the toggle back and says why. A private subject is hidden from a device whose `allow_private` flag is off, together with its card and the memories that are only about private subjects.
+3. **Edit brief, Edit fields, Add alias.** Each opens a small form in the drawer and posts `POST /subject/update`. The fields form lists the keys of the subject's kind, sends only the boxes that changed, and removes a field when its box is emptied. A field edited here is marked confirmed now. Adding an alias sends the whole list in lowercase, and each alias has a Remove button.
+4. **Retire.** Retire sets the status to `retired`, and the toast has an Undo that sets it back to `active`. A retired subject shows Bring back instead. The statuses `proposed` and `stale` are never set from the dashboard.
+5. **New subject.** The button opens a form with kind, name, slug and brief and posts `POST /subject`. The slug is 2 to 40 lowercase letters and numbers with single dashes, checked in the page and again by the Worker, which refuses a slug that is taken. A new subject opens in its drawer.
+6. **Subjects in the memory drawer.** A memory shows a Subjects row of chips when it has an `about` link to a card. Each chip opens the subject. The page reads `GET /subjects` to know which links end at a card, and leaves the row out when the Worker has no such route.
+
+This phase makes subjects by hand. Adding a memory to a subject is a link of type `about` from the memory to the card, made with the Link button in the memory drawer. Nothing is assigned automatically yet.
+
 ## What it can write
 
-A browser login may change memories only through the routes the screens use, `/capture`, `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link` and `/unlink`. Through `/capture` it may only save profile and person notes, which is what the People screen needs. It cannot create device tokens, import, reindex, run the nightly job or run a backup. Each write must come from the dashboard's own page. See [security](security.md) for the checks.
+A browser login may change memories only through the routes the screens use, `/capture`, `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link`, `/unlink`, `/subject` and `/subject/update`. Through `/capture` it may only save profile and person notes, which is what the People screen needs. It cannot create device tokens, import, reindex, run the nightly job or run a backup. Each write must come from the dashboard's own page. See [security](security.md) for the checks.
 
 The insight routes only read. A test checks that calling each of them changes no table except the audit trail.
 

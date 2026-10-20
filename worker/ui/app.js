@@ -10,9 +10,10 @@ import * as home from "./screens/home.js";
 import * as memories from "./screens/memories.js";
 import * as people from "./screens/people.js";
 import * as search from "./screens/search.js";
+import * as subjects from "./screens/subjects.js";
 import * as trash from "./screens/trash.js";
 
-const SCREENS = { home, search, memories, activity, trash, capsule, people, health, audit };
+const SCREENS = { home, search, memories, activity, trash, capsule, people, subjects, health, audit };
 const main = document.getElementById("main");
 const shell = createShell({ request });
 const ctx = { request, now: () => Date.now(), shell };
@@ -39,7 +40,7 @@ function route() {
 }
 
 // A memory link on a screen that has the drawer opens the drawer there, so reading never takes you off the page you are on.
-const WITH_DRAWER = new Set(["home", "search", "activity", "trash", "capsule", "people", "audit"]);
+const WITH_DRAWER = new Set(["home", "search", "activity", "trash", "capsule", "people", "subjects", "audit"]);
 main.addEventListener("click", (e) => {
   const a = e.target.closest('a[href^="#/memories/"]');
   if (!a || e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;

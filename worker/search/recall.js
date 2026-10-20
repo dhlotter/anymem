@@ -6,6 +6,7 @@ import { embedTexts } from "./embed.js";
 import { keywordSearch } from "./fts.js";
 import { cleanQuery } from "./query.js";
 import { minRerank, minSimilarity, RARE_IDF, ruleChecks } from "./relevance.js";
+import { mayBeRestricted, SEES_PRIVATE_SQL, visibleOnly } from "../subjects/private.js";
 
 export const RRF_K = 60;
 export const RARE_BOOST = 2; // a keyword hit that holds a rare word counts double, so an exact identifier beats a vague neighbour
@@ -15,6 +16,7 @@ const RERANK_TOP = 8; // scoring more than the hook can use changed nothing on t
 const SNIPPET_CHARS = 1200;
 const DEFAULT_TOP_K = 5;
 export const MAX_TOP_K = 50;
+const MAX_SUBJECTS = 2; // cards shown above the results
 
 /**
  * Vector search. The best chunk of each memory counts, with its raw cosine similarity.
@@ -101,6 +103,23 @@ async function loadFull(db, ids) {
   return { content: new Map(rows.results.map((r) => [r.id, r.content])), tagsOf };
 }
 
+/** The part of a result that is the memory itself. */
+const entryOf = (row, full) => ({
+  id: row.id,
+  name: row.name,
+  description: row.description,
+  type: row.type,
+  content: full.content.get(row.id),
+  tags: (full.tagsOf.get(row.id) ?? []).sort(),
+  project: row.project,
+  origin: row.origin,
+  harness: row.harness,
+  harness_label: harnessLabel(row.harness, row.origin),
+  status: row.status,
+  created_at: row.created_at,
+  updated_at: row.updated_at,
+});
+
 const round = (n, places) => (n === null ? null : Math.round(n * 10 ** places) / 10 ** places);
 
 /**
@@ -120,17 +139,19 @@ const round = (n, places) => (n === null ? null : Math.round(n * 10 ** places) /
  * @property {boolean} [capsule] include capsule memories
  * @property {boolean} [explain] add the why object
  * @property {boolean} [checks] with explain, add every relevance rule and whether it held
+ * @property {{kind: string, id: string}} [actor] who asks. A device without allow_private never gets a private memory, see subjects/private.js. Left out, nothing is hidden.
  */
 
 /**
- * @param {{DB: any, AI: any, VECTORIZE: any, RECALL_MIN_SIM?: string}} env
+ * @param {{DB: any, AI: any, VECTORIZE: any, RECALL_MIN_SIM?: string, SUBJECTS?: string}} env with SUBJECTS "on" the reply also has subjects, the cards the relevant results are about
  * @param {RecallParams} params
  * @param {() => number} now
- * @returns {Promise<{query: string, results: any[], degraded?: string}>}
+ * @returns {Promise<{query: string, results: any[], subjects?: any[], degraded?: string}>}
  */
 export async function recall(env, params, now) {
   const query = cleanQuery(params.query);
-  if (!query) return { query, results: [] };
+  const none = env.SUBJECTS === "on" ? { subjects: [] } : {};
+  if (!query) return { query, results: [], ...none };
   const filters = { ...params, project: params.project ?? null, excludeIds: params.excludeIds ?? [], tags: params.tags ?? [] };
   let degraded;
   const timings = {};
@@ -145,9 +166,10 @@ export async function recall(env, params, now) {
   ]);
   const tSearched = now();
   const merged = fuse(dense, keyword);
-  if (!merged.size) return { query, results: [], ...(degraded ? { degraded } : {}) };
+  if (!merged.size) return { query, results: [], ...none, ...(degraded ? { degraded } : {}) };
 
-  const rows = await load(env.DB, [...merged.keys()], filters);
+  // Hidden memories go before ranking, so top_k is still filled and the relevance of the others does not change.
+  const rows = await visibleOnly(env.DB, await load(env.DB, [...merged.keys()], filters), params.actor);
   timings.load = now() - tSearched;
   const at = now();
   const cutoff = minSimilarity(env);
@@ -172,19 +194,7 @@ export async function recall(env, params, now) {
   const results = returned.map(({ row, hit, score }, position) => {
     const checks = ruleChecks({ similarity: hit.similarity, rerank: rerank.get(row.id) ?? null, terms: hit.terms, query, cutoff, rerankCutoff, position, denseRank: hit.denseRank, keywordRank: hit.keywordRank, coverage: hit.coverage, words });
     return {
-      id: row.id,
-      name: row.name,
-      description: row.description,
-      type: row.type,
-      content: full.content.get(row.id),
-      tags: (full.tagsOf.get(row.id) ?? []).sort(),
-      project: row.project,
-      origin: row.origin,
-      harness: row.harness,
-      harness_label: harnessLabel(row.harness, row.origin),
-      status: row.status,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
+      ...entryOf(row, full),
       score: round(score, 6),
       similarity: round(hit.similarity, 4),
       ...(rerank.has(row.id) ? { rerank: round(rerank.get(row.id), 4) } : {}),
@@ -194,5 +204,56 @@ export async function recall(env, params, now) {
         : {}),
     };
   });
-  return { query, results, timings, ...(degraded ? { degraded } : {}) };
+  const subjects = env.SUBJECTS === "on" ? await subjectsFor(env.DB, results, params.actor) : undefined;
+  return { query, results, ...(subjects ? { subjects } : {}), timings, ...(degraded ? { degraded } : {}) };
+}
+
+/** The display name of a card. The card's description is "<kind> card for <name>". */
+const nameOf = (row) => (row.description.startsWith(`${row.kind} card for `) ? row.description.slice(`${row.kind} card for `.length) : row.slug);
+
+/** The subject as recall shows it. brief is the text of the card memory. */
+const subjectOf = (row) => ({ id: row.id, slug: row.slug, name: nameOf(row), kind: row.kind, brief: row.body.trim(), fields: JSON.parse(row.fields) });
+
+// A subject card as a row: the subject, its card memory, and for a device without allow_private only a shared subject.
+const CARD = "SELECT s.id, s.slug, s.kind, s.fields, m.description, m.body FROM subjects s JOIN memories m ON m.id = s.id WHERE m.deleted_at IS NULL";
+const sharedOnly = (actor) => (mayBeRestricted(actor) ? { sql: ` AND (s.scope <> 'private' OR ${SEES_PRIVATE_SQL})`, args: [actor.id] } : { sql: "", args: [] });
+
+/**
+ * The cards of the active or stale subjects that the relevant results are about, the best result's subject first, at most MAX_SUBJECTS.
+ * One query, after ranking. Showing a card is not a recall of it, so nothing is counted.
+ * @returns {Promise<any[]>} empty when nothing relevant is about a subject
+ */
+async function subjectsFor(db, results, actor) {
+  const via = results.filter((r) => r.relevant).map((r) => r.id);
+  if (!via.length) return [];
+  const gate = sharedOnly(actor);
+  const { results: rows } = await db
+    .prepare(`SELECT c.*, l.source_id AS via FROM (${CARD} AND s.status IN ('active', 'stale')${gate.sql}) c JOIN links l ON l.target_id = c.id AND l.link_type = 'about' WHERE l.source_id IN (SELECT value FROM json_each(?))`)
+    .bind(...gate.args, JSON.stringify(via))
+    .all();
+  const found = new Map();
+  for (const row of rows) found.set(row.id, { row, via: [...(found.get(row.id)?.via ?? []), row.via] });
+  const rank = (entry) => Math.min(...entry.via.map((id) => via.indexOf(id)));
+  return [...found.values()]
+    .sort((a, b) => rank(a) - rank(b) || b.via.length - a.via.length || (a.row.id < b.row.id ? -1 : 1))
+    .slice(0, MAX_SUBJECTS)
+    .map(({ row, via: ids }) => ({ ...subjectOf(row), via: ids.sort((a, b) => via.indexOf(a) - via.indexOf(b)) }));
+}
+
+/**
+ * The memories that are about one subject, newest first, at most topK, and no scores because nothing was ranked. A private subject is
+ * not found for a device without allow_private. Its members are then all visible, since each has an about link to a subject the device can see.
+ * @returns {Promise<{subject: any, results: any[]} | null>} null when there is no such subject for this caller
+ */
+export async function recallSubject(env, { slug, topK, actor }) {
+  const gate = sharedOnly(actor);
+  const card = await env.DB.prepare(`${CARD} AND s.slug = ?${gate.sql}`).bind(slug, ...gate.args).first();
+  if (!card) return null;
+  const { results: rows } = await env.DB
+    .prepare("SELECT m.id, m.name, m.description, m.type, m.status, m.origin, m.harness, m.project, m.created_at, m.updated_at FROM memories m WHERE m.deleted_at IS NULL AND m.valid_until IS NULL AND m.status <> 'pending' AND m.id IN (SELECT source_id FROM links WHERE target_id = ? AND link_type = 'about') ORDER BY m.updated_at DESC, m.id DESC LIMIT ?")
+    .bind(card.id, Math.min(topK ?? DEFAULT_TOP_K, MAX_TOP_K))
+    .all();
+  const visible = await visibleOnly(env.DB, rows, actor);
+  const full = await loadFull(env.DB, visible.map((r) => r.id));
+  return { subject: subjectOf(card), results: visible.map((row) => entryOf(row, full)) };
 }

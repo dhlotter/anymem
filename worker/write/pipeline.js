@@ -16,6 +16,7 @@ import { createCounters } from "../counters.js";
 import { takeWriteSlot, writeRefused } from "../limits.js";
 import { ADMIN_ORIGINS, adminHeld, adminOnlyMessage, adminOnlyTags, parseMemory } from "../memory/parse.js";
 import { createStore } from "../memory/store.js";
+import { hiddenIds } from "../subjects/private.js";
 import { indexMemories } from "../search/indexer.js";
 import { judgeConflict } from "./conflict.js";
 import { classifyKind } from "./kind.js";
@@ -103,18 +104,28 @@ async function run({ env, ctx, now, actorId, actorKind, memoryIds }, w, counters
   // 4. Duplicates, near duplicates and contradictions only look at the memories of this project and the global ones (project '').
   const scope = parsed.project ?? "";
   const exact = async () => env.DB.prepare(`SELECT id FROM memories WHERE content_hash = ? AND project IN (?, '') AND ${LIVE_SAME} LIMIT 1`).bind(parsed.content_hash, scope).first();
+  // A device that may not see private subjects is told "duplicate" for a match it may not see, without the id, so a capture cannot probe a hidden memory.
+  const actor = { kind: actorKind, id: actorId };
+  const hides = async (id) => Boolean(id) && (await hiddenIds(env.DB, [id], actor)).has(id);
   const duplicate = async (found) => {
     counters.bump("capture.rejected.duplicate");
+    if (await hides(found.id)) return { status: 200, body: { ok: true, duplicate: true } };
     memoryIds.push(found.id);
     return { status: 200, body: { ok: true, duplicate: true, matchId: found.id } };
   };
+  // An exact copy of a memory the writer may not see is not a duplicate for this writer, so a capture cannot tell whether a hidden memory has this text.
+  let allowDuplicate = false;
   const dup = await exact();
-  if (dup) return duplicate(dup);
+  if (dup) {
+    if (await hides(dup.id)) allowDuplicate = true;
+    else return duplicate(dup);
+  }
 
   // 5. Only a memory of the same project is updated. An update also sets the project from the write's tags, so a memory of
   // another project (or a global one, for a project write) would move.
   if (SAME_NAME_ORIGINS.includes(w.origin) && parsed.name) {
-    const same = await env.DB.prepare(`SELECT id FROM memories WHERE name = ? AND origin = ? AND project = ? AND ${LIVE_SAME} ORDER BY created_at DESC, id DESC LIMIT 1`).bind(parsed.name, w.origin, scope).first();
+    let same = await env.DB.prepare(`SELECT id FROM memories WHERE name = ? AND origin = ? AND project = ? AND ${LIVE_SAME} ORDER BY created_at DESC, id DESC LIMIT 1`).bind(parsed.name, w.origin, scope).first();
+    if (same && (await hides(same.id))) same = null; // a hidden memory is not updated by a device, the capture is stored as a new memory
     // A device token never reaches a memory that holds capsule tags or canonical status, so a same name capture is stored as a new memory.
     const sameEntry = same && actorKind === "device" ? await store.get(same.id) : null;
     const held = sameEntry ? adminHeld(sameEntry) : [];
@@ -136,18 +147,24 @@ async function run({ env, ctx, now, actorId, actorKind, memoryIds }, w, counters
       counters.bump("model.failure.embed");
     }
   }
-  const top = neighbours[0];
-  if (top && top.similarity >= REFUSE_SIMILARITY) {
+  const hidden = await hiddenIds(env.DB, neighbours.map((n) => n.id), actor);
+  const nearest = neighbours[0];
+  if (nearest && nearest.similarity >= REFUSE_SIMILARITY && !hidden.has(nearest.id)) {
     counters.bump("capture.rejected.near_duplicate");
-    memoryIds.push(top.id);
-    return { status: 200, body: { ok: true, duplicate: true, matchId: top.id, score: round4(top.similarity) } };
+    memoryIds.push(nearest.id);
+    return { status: 200, body: { ok: true, duplicate: true, matchId: nearest.id, score: round4(nearest.similarity) } };
   }
+  // The warning and the contradiction check only look at memories the writer may see, and never at a subject card, which a
+  // contradiction would close.
+  const cards = neighbours.length ? new Set((await env.DB.prepare("SELECT id FROM subjects WHERE id IN (SELECT value FROM json_each(?))").bind(JSON.stringify(neighbours.map((n) => n.id))).all()).results.map((r) => r.id)) : new Set();
+  if (hidden.size || cards.size) neighbours = neighbours.filter((n) => !hidden.has(n.id) && !cards.has(n.id));
+  const top = neighbours[0];
   const decision = await judgeConflict(env, parsed.content, neighbours, counters);
 
   // 9
   const entry = await store.create(
     { ...parsed, origin: w.origin, harness: w.harness, session: w.session, probation_until: isCapture ? now() + PROBATION_MS : null },
-    { unlessLiveDuplicate: true },
+    { unlessLiveDuplicate: !allowDuplicate },
   );
   if (!entry) {
     // A racing write of the same text landed between the check and the insert.

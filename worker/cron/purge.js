@@ -14,6 +14,8 @@ export const PURGED_KEY = "purged_total";
 /**
  * Delete memories that have been in the trash for more than 14 days, with their tags, keys, links, link rejections, versions and vectors.
  * Each batch of 100 costs 4 subrequests, plus one more for every 500 vectors it deletes.
+ * The card of a private subject that still has members stays in the trash. Purging it would remove the links that keep those members private,
+ * so they would turn visible to every device. Unlink the members first.
  * @returns {Promise<{purged: number, vectors: number, remaining: boolean}>}
  */
 export async function purgeTrash(env, { now, budget }) {
@@ -22,7 +24,7 @@ export async function purgeTrash(env, { now, budget }) {
   let vectors = 0;
   let more = false;
   while (budget.has(COST_PER_BATCH)) {
-    const { results } = await env.DB.prepare("SELECT id FROM memories WHERE deleted_at IS NOT NULL AND deleted_at < ? ORDER BY deleted_at, id LIMIT ?").bind(cutoff, BATCH).all();
+    const { results } = await env.DB.prepare("SELECT id FROM memories WHERE deleted_at IS NOT NULL AND deleted_at < ? AND NOT EXISTS (SELECT 1 FROM subjects s WHERE s.id = memories.id AND s.scope = 'private' AND EXISTS (SELECT 1 FROM links l WHERE l.target_id = s.id AND l.link_type = 'about')) ORDER BY deleted_at, id LIMIT ?").bind(cutoff, BATCH).all();
     more = results.length === BATCH;
     if (!results.length) break;
     const ids = JSON.stringify(results.map((r) => r.id));

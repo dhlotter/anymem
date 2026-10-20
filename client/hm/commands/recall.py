@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from urllib.parse import urlencode
 
-from hm import api, shapes, skill
+from hm import api, cards, shapes, skill
 
 COMMAND = "recall"
 HELP = "search memories, best first. Shows the closest few with their text"
@@ -37,6 +37,9 @@ def run(ns):
     if not found:
         print("no memories found")
         return 0
+    card = cards.block(shapes.subjects(reply), [r.get("id") for r in found if r.get("relevant", True)])
+    if card:
+        print(card)  # the subject cards the Worker reached through a relevant result, above the memories
     for i, r in enumerate(found, 1):
         mark = "" if r.get("relevant", True) else "  (weak match)"
         print(f"{i}. {skill.line(r)}{mark}")

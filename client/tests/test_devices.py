@@ -2,6 +2,7 @@
 """Runnable check for the devices script. No network: hm.api.request is replaced by a fake Worker."""
 from __future__ import annotations
 
+import argparse
 import io
 import os
 import stat
@@ -44,10 +45,22 @@ def fake(method, path, body=None, timeout=30, settings=None):
         return {"ok": True, "device": {"id": "dev-new", "label": body["label"]}, "token": TOKEN}
     if (method, path) == ("POST", "/devices/revoke"):
         return {"ok": True}
+    if (method, path) == ("POST", "/devices/private"):
+        return {"ok": True, "id": body["id"], "allow_private": body["allow_private"]}
     raise AssertionError("unexpected call %s %s" % (method, path))
 
 
 api.request = fake
+
+
+def _refused(parser, argv):
+    """True when argparse refuses argv (it exits 2 and prints to stderr)."""
+    with redirect_stderr(io.StringIO()):
+        try:
+            parser.parse_args(argv)
+        except SystemExit as e:
+            return e.code == 2
+    return False
 
 
 def capture(fn, *a):
@@ -95,6 +108,25 @@ check("revoke refuses an ambiguous prefix and revokes nothing", rc == 1 and "mat
 
 rc, _, err = capture(devices.run, ns("revoke", id="dev-zzzz"))
 check("revoke reports an unknown id", rc == 1 and "no device" in err)
+
+del calls[:]
+rc, out, _ = capture(devices.run, ns("allow-private", id="dev-bbbb", state="off"))
+check("allow-private off resolves a prefix and posts the full id with allow_private false",
+      rc == 0 and calls[-1] == ("POST", "/devices/private", {"id": "dev-bbbb3333-0000", "allow_private": False}) and "dev-bbbb3333-0000 can no longer see private subjects" in out)
+rc, out, _ = capture(devices.run, ns("allow-private", id="dev-bbbb", state="on"))
+check("allow-private on posts allow_private true", calls[-1][2] == {"id": "dev-bbbb3333-0000", "allow_private": True} and "may now see private subjects" in out)
+del calls[:]
+rc, _, err = capture(devices.run, ns("allow-private", id="dev-aaaa", state="off"))
+check("allow-private refuses an ambiguous prefix and changes nothing", rc == 1 and "matches 2 devices" in err and all(c[1] != "/devices/private" for c in calls))
+rc, _, err = capture(devices.run, ns("allow-private", id="dev-zzzz", state="off"))
+check("allow-private reports an unknown id", rc == 1 and "no device" in err)
+parser = argparse.ArgumentParser()
+devices.register(parser)
+check("allow-private takes only on or off", parser.parse_args(["allow-private", "d1", "on"]).state == "on" and all(_refused(parser, ["allow-private", "d1", w]) for w in ("yes", "true", "1")))
+STORE[1] = {**STORE[1], "allow_private": False}
+rc, out, _ = capture(devices.run, ns("list"))
+rows = out.splitlines()
+check("list marks a device kept from private subjects and no other", rows[1].endswith("private subjects off") and not rows[0].endswith("private subjects off") and not rows[2].endswith("private subjects off"))
 
 api.request = lambda *a, **k: (_ for _ in ()).throw(api.ApiError(403, "Forbidden"))
 rc, _, err = capture(devices.run, ns("list"))

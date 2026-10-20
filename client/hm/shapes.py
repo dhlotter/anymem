@@ -29,6 +29,12 @@ def results(reply) -> list:
     return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
 
 
+def subjects(reply) -> list:
+    """The subject cards of a recall reply, or the rows of a /subjects reply. Empty when the Worker sent none (the variable is off, or an older Worker)."""
+    rows = reply.get("subjects") if isinstance(reply, dict) else None
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
 def sections(reply) -> "list | None":
     """The capsule sections that have text. v2 puts them flat in `sections`, the old Worker put a JSON string in `text`.
     None when the reply is neither, an empty list when the capsule is empty."""
@@ -65,7 +71,9 @@ def ids_of(reply) -> list:
                 add(reply[key].get("id"))
         if isinstance(reply.get("entry"), dict):
             add(reply["entry"].get("id"))
-        for key in ("results", "entries"):
+        if isinstance(reply.get("subject"), dict):
+            add(reply["subject"].get("id"))
+        for key in ("results", "entries", "subjects"):
             if isinstance(reply.get(key), list):
                 for r in reply[key]:
                     if isinstance(r, dict):

@@ -1,6 +1,6 @@
 # Worker architecture
 
-Version 2.0.5. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
+Version 2.0.6. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
 
 ## Module map
 
@@ -11,9 +11,11 @@ Version 2.0.5. This file says how the Worker is built and why. The routes and se
 | `auth.js` | Access JWT check with WebCrypto, bearer and device token check, auth settings. |
 | `http.js` | `HttpError`, JSON replies, bounded body reader, integer query parameters. |
 | `audit.js` | Writes, lists and purges audit rows. |
-| `devices.js` | Device token routes. |
+| `devices.js` | Device token routes, including `POST /devices/private`. |
 | `memory/parse.js` | Frontmatter, hashtags, reserved tags, content hash, the 30,000 character limit. Pure, no database. |
 | `memory/store.js` | The storage layer on D1. `createStore(db, now)` gives create, get, getVersion, update, append, setStatus, softDelete, restore, supersede, undo, history, link and list. |
+| `subjects/store.js`, `subjects/routes.js` | Subjects: the store (create, update, get, list, field checks) and the handlers for `/subject`, `/subject/update`, `/subjects`. See "Subjects" below. |
+| `subjects/private.js` | The one place that decides which memories and subjects a device kept from private subjects may not see. |
 | `memory/diff.js` | The one line summary of what a version changed, used by history. |
 | `memory/routes.js` | The handlers for `/entry`, `/list`, `/history`, `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link`, `/unlink`, `/links`. |
 | `search/chunk.js` | Cuts a memory into chunks (1,600 characters, 200 overlap, at paragraph, sentence or word breaks), builds the search keys, and makes the vector ids. |
@@ -24,6 +26,7 @@ Version 2.0.5. This file says how the Worker is built and why. The routes and se
 | `search/recall.js`, `search/routes.js` | The recall pipeline and `GET /recall`. |
 | `search/relevance.js` | Decides `relevant` per hit. |
 | `search/questions.js` | Likely questions per memory from `granite-4.0-h-micro` in JSON mode. |
+| `subjects/private.js` | The private rule: `hiddenIds`, `canSee` and `visibleOnly`. The one place it lives, see "The private rule" below. |
 | `admin/routes.js`, `admin/legacy.js` | `POST /admin/reindex`, `POST /admin/questions`, `POST /admin/harness`, `POST /import` and the old export mapping. |
 | `write/pipeline.js` | The write pipeline behind `POST /capture`. Every step in order, see "The write pipeline" below. |
 | `write/route.js` | The `POST /capture` handler. Reads the request, maps source to origin, calls the pipeline. |
@@ -255,7 +258,7 @@ rows older than 90 days.
    `GET /history` works on a trashed memory.
 3. `/restore` works while `now - deleted_at` is at most 14 days. After that it is 410 `restore_window_passed`. A memory
    that is not in the trash is 409 `not_in_trash`. Forgetting a trashed memory returns the same entry and changes nothing.
-4. The nightly `purge_trash` step deletes a memory 14 days after it was trashed, with its rows, tags, keys, links, link rejections, versions, FTS row and vectors.
+4. The nightly `purge_trash` step deletes a memory 14 days after it was trashed, with its rows, tags, keys, links, link rejections, subject row (the foreign key cascade removes it), versions, FTS row and vectors.
 
 ### Validity and lists
 
@@ -268,13 +271,35 @@ rows older than 90 days.
 
 ### Links
 
-1. A link is `(source_id, target_id, link_type)` between two live memories, plus `created_at`, `made_by` (`user` or `system`, default `user`) and `confidence` (a number the system sets, null for a user link). Migration 0005 added the last two. Links that existed before are the user's.
+1. A link is `(source_id, target_id, link_type)` between two live memories, plus `created_at`, `made_by` (`user` or `system`, default `user`) and `confidence` (a number the system sets, null for a user link). Migration 0005 added the last two. Links that existed before are the user's. An `about` link to a subject card makes the memory a member of that subject.
 2. The link types are `about`, `part_of`, `owns`, `affects`, `decided`, `supersedes`, `contradicts`, `derived_from`, `about_person` and `related` (`LINK_TYPES` in `memory/parse.js`). `POST /link` takes any of them except `supersedes` and `derived_from`, which only the system writes. An unknown type is 400 `bad_link_type` and the message lists the types. A reserved type is 400 `reserved_link_type`. Rows with another free text type from before the list stay as they are, and `GET /links` returns the stored type. A client shows a type outside the list as `related`.
 3. `POST /unlink {source_id, target_id, type}` replies `{ok, removed}`. Removing a link with `made_by = 'system'` also inserts `(source_id, target_id, link_type, created_at)` into `link_rejections` in the same batch, so the system never makes that link again. Removing a user link writes no rejection.
 4. A device token may remove only user links. A system link is 403 `admin_only`, and the link stays. A link with either end holding capsule tags or the canonical status is refused to a device token with the same 403 as an edit of that memory (`guardDevice`). The admin token and a browser login may remove any link.
 5. `GET /links?id=` is `{ok, id, links: [{type, direction, other_id, other_name, made_by, confidence, created_at}]}`, sorted by type and then newest first. `direction` is `out` when the memory is the source and `in` when it is the target. Only ends that are not in the trash are listed. An id that exists nowhere is 404. Every token kind that reads memories may call it.
 6. `/link` and `/unlink` audit both memory ids, and `/links` the one id. `/unlink` takes a write slot from a device token like `/link` does.
 7. The trash purge deletes the links and the `link_rejections` rows of a purged memory, in both directions.
+
+## Subjects
+
+A subject is a thing memories are about: a person, pet, asset, project, area or topic. This part is subjects made by hand. Nothing assigns memories to them yet.
+
+1. A subject is a row in `subjects` plus a card, an ordinary memory with the same id. The card holds the brief. It is made through the memory store with origin `system`, type `project`, and the tags `subject`, `subject:<slug>` and `subject-kind:<kind>` (`kind:` is a reserved tag prefix, so the kind tag has another name). Its content is a frontmatter note: name is the slug, description is `<kind> card for <display name>`, the body is the brief. The display name is read back from that description, so it has no column. A card is searchable and versioned like any memory, and only the admin token or a browser login can write one (a device token cannot write origin `system`).
+2. The row holds `slug` (unique, 2 to 40 characters of lowercase letters and digits with single dashes), `kind`, `status` (`proposed`, `active`, `stale`, `retired`), `scope` (`shared` or `private`), `fields` and `aliases` as JSON, and the two times. A subject made by hand starts `active`. `proposed` and `stale` are for later automatic work, and `POST /subject/update` refuses them. Deleting the card cascades to the row, so the trash purge needs no step of its own.
+3. `fields` is `{key: {value, confirmed_at, source}}` with `source` `user` for a value a person set. The keys each kind may hold are `FIELD_KEYS` in `subjects/store.js`. Another key is 400 `bad_field`, and a value is a string of 1 to 200 characters. A person has no health or money key. An update merges: a string sets and confirms the key again, `null` removes it. `aliases` are lowercase names, an update replaces the list, at most 20. The brief and every field value go through the same secret screen as an explicit write.
+4. A memory is a member when an `about` link runs from it to the card (`POST /link`). Members are live memories, newest change first, and `GET /subject` returns at most 200 while `member_count` is the real number. A subject whose card is in the trash is a 404 until the card is restored, and its slug stays taken.
+5. A new brief or name writes a new version of the card through `store.update` (reason `update`), so `/history` and `/undo` work on the card. An undo of the card does not change the subject row, so after one the brief shown by `/subject` follows the card and the name follows its description.
+6. `devices.allow_private` (default 1) says whether a device token may see private subjects. `POST /devices/private` sets it, admin token only. The rule that uses it lives in `subjects/private.js` and exports `hiddenIds`, `canSee` and `visibleOnly`: a memory is hidden from a device kept from private subjects when it is the card of a private subject, or when it has an `about` link to a private subject and none to a non private one. The admin token and a browser login see everything. `GET /subjects` and `GET /subject` call it, and a hidden subject is a 404, never a 403.
+7. The subject routes audit the card id. The write routes are admin only with browser write. The read routes take any token and a browser login.
+8. The `SUBJECTS` variable (`on` or `off`, default off) turns on subject cards in recall. The subject routes ignore it.
+
+### The private rule
+
+1. A subject has a scope, `shared` or `private`. A device token whose device has `allow_private = 0` must not see a private subject, its card memory, or a memory whose only `about` links go to private subjects. The admin token, a browser login and a device with `allow_private = 1` see everything.
+2. `subjects/private.js` is the only place that says this. For a memory the rule is: it is the card of a private subject, or it has at least one `about` link to a private subject and no `about` link to a subject that is not private. An `about` link to a memory that is not a subject counts for neither side. The module exports `hiddenIds(db, ids, actor)` (a Set), `canSee(db, id, actor)` and `visibleOnly(db, rows, actor, idOf)`. For pieces of SQL that need the same gate it also exports `SEES_PRIVATE_SQL`, the device flag as an `EXISTS`, which fails closed when the device row cannot be found.
+3. Every call is one query whatever the number of ids, a `json_each` over the ids with the links and subjects read by `EXISTS`. The admin token and a browser login cost no query, and a device costs the one query even when nothing is private.
+4. Where it is applied: `GET /entry` (also an old version, and the trash), `GET /history` and `GET /links` answer 404 for a hidden memory with the text of a missing one, so a device cannot tell the two apart. `GET /links` also drops the links whose other end is hidden, using one check for the memory and all other ends. `GET /list` drops hidden entries after the page is read. `GET /ui/api/memory-extras` does the same as `GET /links` for its links, since they carry the names of the other ends. Recall applies it to its candidates before ranking, and to the subject cards. The subject routes call the same exports for the subject lists and the 404 on a private subject. The actor comes from the route's `actor`. A call to `recall()` with no actor hides nothing, which is how the nightly job and tests call it.
+5. A device token never writes to a memory it may not see (404, the same as a missing id), never changes a subject card, and never adds or removes a link on one. A capture from a device is told "duplicate" without an id when its match is hidden, a hidden memory is never updated in place by a same name capture, and the warning and the contradiction check look only at visible memories. The list pages past hidden rows in SQL, so a cursor never names one. `GET /count` leaves hidden memories out for a device, `GET /ui/api/people` is for the admin token and a browser login only, and the trash purge keeps the card of a private subject that still has members, because deleting it would remove the links that keep them private.
+6. Not covered, on purpose. A memory tagged as a capsule rule is served to every device from the shared capsule cache, so never link one to a private subject. A private card is made as an ordinary memory a moment before its subject row, and the window is closed by making the card and the row in one batch in a later phase.
 
 ## Reply shapes
 
@@ -365,13 +390,16 @@ minute lag.
    with a keyword rank of 2 or better, matched a word of rarity 5 or more that sits inside a name shaped token of the prompt (a
    digit, underscore, hyphen or dot inside, camel case, or a capital after the first word) and covers 60 percent of the idf of all
    the query words (the lookup rule, for identifiers such as R84 or TOP-123). A failed reranker leaves the other rules in charge.
-8. Reply: `{ok, query, results}`. A result has `id, name, description, type, content (whole), tags, project, origin, harness, harness_label, status,
+8. Reply: `{ok, query, results}` and, with the `SUBJECTS` variable set to `on`, `subjects` (see step 11). A result has `id, name, description, type, content (whole), tags, project, origin, harness, harness_label, status,
    created_at, updated_at, score, similarity, rerank (when scored), relevant`, and with `explain=1` `why {dense_score,
    dense_rank, keyword_rank, coverage, query_words, keyword_terms [{term, level, idf}]}` plus `took_ms` and `timings` (ms, embed, vectorize and keyword are since the
    start, load and rerank are the step itself). `degraded: "vector"` marks a reply made without the vector search.
 9. `recall_count` and `last_recalled_at` change only with `count=1`. Only hits marked relevant are counted, and each one also gets a `recall_log` row with the time and the harness of the caller (see "Counters" below), written in its own statement so a failure there never undoes the count. A plain recall writes nothing but its audit row, which lists the
    returned ids. Query parameters are `query, topK (1 to 50, default 5), scope, exclude_ids, tag, kind, type, origin, after,
-   before, min_recalls, as_of, capsule, explain, count`. `synthesize` is ignored.
+   before, min_recalls, as_of, capsule, explain, count, subject`. `synthesize` is ignored.
+10. The private rule runs on the rows the filter step loaded, before ranking, so the cut to `topK`, the order and every relevance check see only what the caller may see. A recall by a device without private access ranks the same as one by the admin token over the visible memories, and a page is still full.
+11. With `SUBJECTS` set to `on`, one query after ranking finds the cards of the relevant results: `about` links from those results to a subject with status `active` or `stale` whose card memory is live, and for a device without private access only a shared subject. The best ranked result's subject comes first, then the one with more `via` results, and two at most are returned. A reply with no cards has `subjects: []`. The reply never has the key when the variable is off or unset. This is the only place recall reads the `subjects` table.
+12. `GET /recall?subject=SLUG` skips search. It reads the card by slug (one query, the private rule in its SQL) and the live members newest updated first, capped by `topK` (a second query), then the text and tags of those members like a recall does. It is not ranked, not counted and takes no part in `recall_log`. Private members need no filter of their own: a member of a visible subject has an `about` link to a subject the caller sees, so the rule never hides it. A subject the caller may not see is 404, like a missing slug.
 
 ### Import and reindex
 

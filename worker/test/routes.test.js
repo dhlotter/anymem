@@ -94,7 +94,7 @@ test("devices, create then list then revoke", async () => {
   assert.match(made.json.token, /^amd_[A-Za-z0-9_-]{43}$/);
   const listed = (await app.call("/devices")).json.devices;
   assert.equal(listed.length, 1);
-  assert.deepEqual(Object.keys(listed[0]).sort(), ["created_at", "id", "label", "last_used_at"]);
+  assert.deepEqual(Object.keys(listed[0]).sort(), ["allow_private", "created_at", "id", "label", "last_used_at"]);
   assert.ok(!JSON.stringify(listed).includes(made.json.token));
   const gone = await app.call("/devices/revoke", { method: "POST", body: { id: made.json.device.id } });
   assert.deepEqual(gone.json, { ok: true, id: made.json.device.id });
@@ -206,9 +206,9 @@ test("routes need auth", async () => {
   }
 });
 
-test("the Worker version is 2.0.5 and matches package.json and the plugin manifest", () => {
+test("the Worker version is 2.0.6 and matches package.json and the plugin manifest", () => {
   const read = (rel) => JSON.parse(readFileSync(new URL(rel, import.meta.url), "utf8"));
-  assert.equal(VERSION, "2.0.5");
+  assert.equal(VERSION, "2.0.6");
   assert.equal(read("../package.json").version, VERSION);
   assert.equal(read("../../.claude-plugin/plugin.json").version, VERSION);
 });

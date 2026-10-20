@@ -2,7 +2,7 @@
 
 The Cloudflare Worker behind anymem. Plain JavaScript ES modules. No dependencies, no bundler, no build step. The code that runs is the code you read. Types are written as JSDoc comments.
 
-Version 2.0.5 (`version.js` and `package.json` agree). It holds auth, the audit trail, device tokens, health and stats, storage and history of memories, search, the write pipeline, extract, the capsule, the dashboard, the nightly job, backups and import. [ARCHITECTURE.md](ARCHITECTURE.md) says how each part works. The people who use anymem never run anything in this folder. `setup.py` uploads these files, see [docs/install.md](../docs/install.md).
+Version 2.0.6 (`version.js` and `package.json` agree). It holds auth, the audit trail, device tokens, health and stats, storage and history of memories, search, the write pipeline, extract, the capsule, the dashboard, the nightly job, backups and import. [ARCHITECTURE.md](ARCHITECTURE.md) says how each part works. The people who use anymem never run anything in this folder. `setup.py` uploads these files, see [docs/install.md](../docs/install.md).
 
 ## Test
 
@@ -56,8 +56,10 @@ For development, a Wrangler deploy works too.
 | `RECALL_MIN_SIM` | var | Cosine at or above which a hit is relevant. A number from 0 to 1, default 0.75 |
 | `RERANK_MIN` | var | Reranker score at or above which a hit is relevant. A number from 0 to 1, default 0.2 |
 | `RERANK` | var | `0` turns the reranker off |
+| `SUBJECTS` | var | `on` makes a recall also return the subject cards its relevant results are about. `off` or unset leaves the reply as it was, with no `subjects` key. `GET /recall?subject=` and the subject routes work whatever it says |
 | `NIGHTLY_SUBREQUESTS` | var | Subrequests the whole nightly run may use. A whole number from 10 to 5000, default 40 (the Free plan). `setup.py` sets 400 when the plan is Paid |
 | `NIGHTLY_WALL_MS` | var | Milliseconds each nightly step may take. A whole number from 1000 to 600000, default 20000. `setup.py` sets 120000 when the plan is Paid |
+| `SUBJECTS` | var | `on` turns on subject cards in recall (`subjects` in the reply). Default `off`. The subject routes work whatever it says |
 | `SMALL_MODEL` | var | The Workers AI model for the small JSON mode jobs (extract, contradiction checks, kind, sensitivity). Default `@cf/meta/llama-3.1-8b-instruct-fast` |
 
 `ALLOWED_HOSTS` is a second layer for a Worker behind a custom domain. If a workers.dev address is ever turned back on, the Worker still refuses it. `setup.py` copies it from the `vars` block of the committed `wrangler.jsonc` on every run, so put it there (or in `wrangler.local.jsonc` for a Wrangler deploy). A value that exists only on the Worker, set by hand, is not read back by `setup.py` and a rerun drops it.
@@ -73,16 +75,21 @@ Every route needs the Access JWT (unless `REQUIRE_ACCESS` is false) and then a b
 | `GET /health` | any, browser | `{ok, version, schema_version, vectorize}`. 503 when the database cannot answer |
 | `GET /count` | any, browser | `{count}`, live memories |
 | `GET /stats` | admin, browser | counts by status and origin, `unvectorized`, `unclassified`, the counters of today and the last 7 days (`capture`, `extract`, `conflicts`, `model_failures`), the last nightly run |
-| `GET /devices` | admin, browser | `{devices}` |
+| `GET /devices` | admin, browser | `{devices}`, each with `allow_private` |
 | `POST /devices` | admin | `{label}` returns `{device, token}` with 201. The token is shown once |
 | `POST /devices/revoke` | admin | `{id}` |
+| `POST /devices/private` | admin | `{id, allow_private}` with a boolean. A device with `allow_private` false never sees a private subject. A browser login is refused (403 `browser_not_allowed`) |
 | `GET /audit` | admin, browser | `since`, `until`, `actor`, `route`, `harness`, `result`, `limit`, `cursor` |
 | `GET /entry`, `GET /list`, `GET /history` | any, browser | read memories |
-| `GET /recall` | any, browser | search |
+| `GET /recall` | any, browser | search, see Recall below. `?subject=SLUG` lists the memories about one subject instead |
 | `POST /capture` | any, browser write for profile and person notes only | the write pipeline |
 | `POST /update`, `/append`, `/status`, `/forget`, `/restore`, `/undo` | any, browser write | change memories. History is kept on every change |
 | `POST /link`, `POST /unlink` | any, browser write | `{source_id, target_id, type}`. `type` is one of `about`, `part_of`, `owns`, `affects`, `decided`, `contradicts`, `about_person`, `related` (`supersedes` and `derived_from` are the system's, 400 `reserved_link_type`). `/unlink` replies `{ok, removed}`. A device token may remove only a user link, not a system link (403 `admin_only`) |
 | `GET /links` | any, browser | `?id=` returns the links of a memory in both directions with `made_by` and `confidence` |
+| `POST /subject` | admin, browser write | `{slug, kind, name, brief?, fields?, aliases?, scope?}` makes a subject and its card memory, replies `{ok, subject}`. A taken slug is 409 `subject_exists`, a bad slug, kind or field is 400 (`bad_slug`, `bad_kind`, `bad_field`) |
+| `POST /subject/update` | admin, browser write | `{id or slug, name?, brief?, fields?, aliases?, scope?, status?}`. `fields` merge and `null` removes a key. `status` is `active` or `retired`. A new brief or name writes a new version of the card |
+| `GET /subjects` | any, browser | `?kind=&status=&scope=&q=` lists subjects, newest updated first, each with `member_count`. `q` matches slug, name and aliases |
+| `GET /subject` | any, browser | `?slug=` or `?id=` returns the subject with its `brief` and up to 200 `members`. A private subject the caller may not see is a 404 |
 | `POST /extract` | any | `{transcript, known, max}` returns `{proposals}` and stores nothing |
 | `GET /prompt-capsules/core` | any, browser | the capsule, with an ETag and 304 |
 | `GET /export` | admin, browser | the whole store in format 2, or a page of it. A browser login gets it without the device `token_hash` values |
@@ -95,8 +102,17 @@ Every route needs the Access JWT (unless `REQUIRE_ACCESS` is false) and then a b
 | `POST /admin/run-maintenance` | admin | run the nightly job now, optionally `{steps, wall_ms, subrequests}` |
 | `POST /vectorize-probe`, `GET /vectorize-probe?probe=` | any | the doctor's vector probe |
 | `GET /ui/api/overview`, `/ui/api/home`, `/ui/api/growth`, `/ui/api/recalls`, `/ui/api/probation`, `/ui/api/activity`, `/ui/api/runs`, `/ui/api/usage`, `/ui/api/audit-facets`, `/ui/api/harnesses` | admin, browser | read routes for the dashboard screens, they write nothing but the audit row |
-| `GET /ui/api/people`, `/ui/api/token-expiry`, `/ui/api/memory-extras` | any, browser | read routes for the dashboard |
+| `GET /ui/api/token-expiry`, `/ui/api/memory-extras` | any, browser | read routes for the dashboard |
+| `GET /ui/api/people` | admin, browser | the profile and person memories for the dashboard |
 | `GET /`, `GET /ui/*` | browser login only | the dashboard files |
+
+### Recall
+
+`GET /recall?query=` replies `{ok, query, results}` as before. With `SUBJECTS` set to `on` the reply also has `subjects`: at most 2 cards, each `{id, slug, name, kind, brief, fields, via}`. A card is there when a returned result with `relevant` true has an `about` link to it, and the subject is `active` or `stale`. `via` lists those result ids, and the card of the best ranked result comes first. `brief` is the text of the card memory. The cards cost one more query and change nothing in `results`. Showing a card is not a recall of it, so `count=1` counts only the results. With `SUBJECTS` off or unset there is no `subjects` key at all.
+
+`GET /recall?subject=SLUG` replies `{ok, query: null, subject, results}`. `subject` is the card in the shape above without `via`. `results` are the live memories with an `about` link to the card, newest updated first, as many as `topK` (default 5, at most 50), each in the same shape as a recall result without the scores, `relevant` and `why`. It is a plain read: nothing is ranked or counted. An unknown or malformed slug is 404.
+
+Private subjects: a device token whose device has `allow_private` 0 never gets a private subject, its card memory, or a memory whose only `about` links go to private subjects, from `/recall`, `/entry`, `/list`, `/history` or `/links`. A hidden memory is a 404 that reads the same as a missing id, and `/list` and `/links` leave it out. A `/list` page is cut before the rule runs, so such a device can get a page shorter than `n` that still has a `next_cursor`. The admin token, a browser login and a device with `allow_private` 1 see everything.
 
 Errors are always `{"error": "...", "code": "..."}`. Callers may send `X-Anymem-Harness` and `X-Anymem-Script` headers, which are written to the audit row, and a hook may send `X-Anymem-Outcomes` (what it did with its prompts), which is added to daily counters and kept nowhere else. There is no MCP route.
 

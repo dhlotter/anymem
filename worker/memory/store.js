@@ -4,6 +4,7 @@ import { badRequest, conflict, forbidden, HttpError, notFound } from "../http.js
 import { isPinnedByTags, KINDS, parseMemory, STATUSES } from "./parse.js";
 import { summarize } from "./diff.js";
 import { harnessLabel, harnessValues } from "../harnesses.js";
+import { hiddenWhere } from "../subjects/private.js";
 
 export const ORIGINS = ["explicit", "capture", "import", "profile", "person", "system"];
 export const TRASH_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
@@ -418,6 +419,7 @@ export function createStore(db, now = Date.now) {
       if (f.before !== undefined) add("m.created_at < ?", f.before);
       if (f.minRecalls !== undefined) add("m.recall_count >= ?", f.minRecalls);
       if (f.maxRecalls !== undefined) add("m.recall_count <= ?", f.maxRecalls);
+      if (f.hideFrom) add(`NOT ${hiddenWhere("m.id")}`, f.hideFrom); // a device that may not see private subjects pages past them, so the cursor never names a hidden row
       const sort = f.sort ?? "created";
       if (!Object.hasOwn(SORTS, sort)) throw badRequest(`sort must be one of ${Object.keys(SORTS).join(", ")}.`);
       const lead = `m.${SORTS[sort]}`;

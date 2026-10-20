@@ -3,6 +3,7 @@ import { readStats } from "./counters.js";
 import { json } from "./http.js";
 import { NEEDS_INDEX } from "./search/indexer.js";
 import { VERSION } from "./version.js";
+import { hiddenWhere } from "./subjects/private.js";
 
 const EMBEDDING_DIMENSIONS = 384;
 
@@ -34,8 +35,11 @@ export async function health({ env }) {
 }
 
 /** GET /count */
-export async function count({ env }) {
-  const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM memories WHERE ${LIVE}`).first();
+export async function count({ env, actor }) {
+  // A device that may not see private subjects is not counted the memories it cannot see.
+  const hidden = actor?.kind === "device" ? ` AND NOT ${hiddenWhere("memories.id")}` : "";
+  const stmt = env.DB.prepare(`SELECT COUNT(*) AS n FROM memories WHERE ${LIVE}${hidden}`);
+  const row = await (hidden ? stmt.bind(actor.id) : stmt).first();
   return json({ count: row.n });
 }
 

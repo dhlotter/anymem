@@ -69,6 +69,7 @@ export async function dump(app) {
     questions: await q("SELECT memory_id, position, text, created_at FROM memory_keys WHERE key_type = 'question' ORDER BY memory_id, position"),
     links: await q("SELECT * FROM links ORDER BY source_id, target_id, link_type"),
     link_rejections: await q("SELECT * FROM link_rejections ORDER BY source_id, target_id, link_type"),
+    subjects: await q("SELECT * FROM subjects ORDER BY id"),
     devices: await q("SELECT * FROM devices ORDER BY id"),
     fts: await q("SELECT memory_id, name, description, body, keys FROM memory_fts ORDER BY memory_id"),
   };
@@ -78,7 +79,8 @@ const TRICKY = "Line one  with  double spaces\tand a tab.\r\nSecond line, emoji 
 
 /**
  * A store with one of everything a backup carries: memories of several origins, tags, history, a closed and a trashed
- * memory, links (one made by the system, one rejected), question keys, usage counts, probation, a project, and two devices (one revoked).
+ * memory, links (one made by the system, one rejected), question keys, usage counts, probation, a project, two subjects (one private),
+ * and two devices (one revoked, one barred from private subjects).
  * @returns {Promise<{ids: Record<string, string>, token: string}>}
  */
 export async function populate(app) {
@@ -110,11 +112,17 @@ export async function populate(app) {
     app.env.DB.prepare("DELETE FROM memory_fts WHERE memory_id = ?").bind(ids.explicit),
     app.env.DB.prepare(FTS_INSERT).bind(ids.explicit),
   ]);
+  // a pet that is private and a project that is shared, with their cards among the memories above
+  const fields = JSON.stringify({ species: { value: "dog", confirmed_at: app.clock.t, source: "user" } });
+  await app.env.DB.batch([
+    app.env.DB.prepare("INSERT INTO subjects (id, slug, kind, status, scope, fields, aliases, created_at, updated_at) VALUES (?, 'pip', 'pet', 'active', 'private', ?, '[\"pippin\"]', ?, ?)").bind(ids.explicit, fields, app.clock.t, app.clock.t + 5),
+    app.env.DB.prepare("INSERT INTO subjects (id, slug, kind, status, scope, created_at, updated_at) VALUES (?, 'alpha', 'project', 'retired', 'shared', ?, ?)").bind(ids.updated, app.clock.t, app.clock.t),
+  ]);
   const laptop = await app.call("/devices", { method: "POST", body: { label: "laptop" } });
   const phone = await app.call("/devices", { method: "POST", body: { label: "phone" } });
   app.clock.t += 1000;
   await app.call("/devices/revoke", { method: "POST", body: { id: phone.json.device.id } });
-  await app.env.DB.prepare("UPDATE devices SET last_used_at = ? WHERE id = ?").bind(app.clock.t, laptop.json.device.id).run();
+  await app.env.DB.prepare("UPDATE devices SET last_used_at = ?, allow_private = 0 WHERE id = ?").bind(app.clock.t, laptop.json.device.id).run();
   return { ids, token: laptop.json.token };
 }
 

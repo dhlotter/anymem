@@ -10,11 +10,12 @@ import { ago, count, DAY_MS, formatTime, titleOf } from "./format.js";
 import { harnessText, recalledByView, savedByText } from "./harness.js";
 import { html } from "./html.js";
 import { hashFor } from "./route.js";
+import { subjectHref, subjectsOf } from "./subjects.js";
 
 const when = (ms, now) => (ms ? html`${formatTime(ms)} (${ago(ms, now)})` : "none");
 
-/** The facts of a memory. Saved by and Recalled by tool come from the extras, and are left out when the Worker does not send them. */
-export function factsView(e, extras, now) {
+/** The facts of a memory. Saved by and Recalled by tool come from the extras, and are left out when the Worker does not send them. Subjects are the cards it is about, each a chip that opens the subject. */
+export function factsView(e, extras, now, subjects = []) {
   const saved = savedByText(extras?.saved_by, now);
   const used = recalledByView(extras);
   return html`<dl class="facts">
@@ -22,6 +23,7 @@ export function factsView(e, extras, now) {
   ${saved === null ? "" : html`<div><dt>Saved by</dt><dd>${saved}</dd></div>`}
   <div><dt>Kind</dt><dd>${e.kind ?? "not classified"}</dd></div><div><dt>Pinned</dt><dd>${e.pinned ? "yes" : "no"}</dd></div>
   <div><dt>Recalled</dt><dd>${e.recall_count} ${e.recall_count === 1 ? "time" : "times"}, last ${e.last_recalled_at ? ago(e.last_recalled_at, now) : "never"}</dd></div>
+  ${subjects.length ? html`<div class="facts__wide"><dt>Subjects</dt><dd><ul class="tags" aria-label="Subjects">${subjects.map((s) => html`<li><a href="${subjectHref(s.slug)}">${s.name}</a></li>`)}</ul></dd></div>` : ""}
   ${used ? html`<div class="facts__wide"><dt>Recalled by</dt><dd>${used.text}<span class="cell__sub">${used.note}</span></dd></div>` : ""}
   <div><dt>Probation ends</dt><dd>${extras?.probation_until ? when(extras.probation_until, now) : "not on probation"}</dd></div>
   <div><dt>Valid from</dt><dd>${when(e.valid_from, now)}</dd></div>
@@ -36,14 +38,14 @@ const SYSTEM_ONLY = ["supersedes", "derived_from"];
 export const ADDABLE_LINK_TYPES = LINK_TYPES.filter((t) => !SYSTEM_ONLY.includes(t));
 const shownType = (type) => (LINK_TYPES.includes(type) ? type : "related"); // an older link with free text shows as related
 
-/** One link of the open memory. The button keeps the stored type, so a link of an older free text type can still be taken away. */
-const linkRow = (l) => html`<li><span>${l.direction === "out" ? "Links to" : "Linked from"} <a href="${memoryLink(l.other_id)}">${l.other_name || l.other_id.slice(0, 8)}</a>${l.made_by === "system" ? html` ${badge("made by anymem", "muted")}${typeof l.confidence === "number" ? html` <span class="muted">${Math.round(l.confidence * 100)}% sure</span>` : ""}` : ""}</span><button type="button" class="btn btn--quiet" data-action="unlink" data-other="${l.other_id}" data-direction="${l.direction}" data-type="${l.type}" data-made-by="${l.made_by}">${l.made_by === "system" ? "Not this" : "Remove"}<span class="sr"> link, ${l.other_name || l.other_id.slice(0, 8)}</span></button></li>`;
+/** One link of the open memory. The button keeps the stored type, so a link of an older free text type can still be taken away. Without actions the row only names the other end. */
+const linkRow = (l, actions = true) => html`<li><span>${l.direction === "out" ? "Links to" : "Linked from"} <a href="${memoryLink(l.other_id)}">${l.other_name || l.other_id.slice(0, 8)}</a>${l.made_by === "system" ? html` ${badge("made by anymem", "muted")}${typeof l.confidence === "number" ? html` <span class="muted">${Math.round(l.confidence * 100)}% sure</span>` : ""}` : ""}</span>${actions ? html`<button type="button" class="btn btn--quiet" data-action="unlink" data-other="${l.other_id}" data-direction="${l.direction}" data-type="${l.type}" data-made-by="${l.made_by}">${l.made_by === "system" ? "Not this" : "Remove"}<span class="sr"> link, ${l.other_name || l.other_id.slice(0, 8)}</span></button>` : ""}</li>`;
 
-/** The links of a memory from GET /links, grouped by type. Null leaves the section out, for a Worker that could not list them. */
-export function linksView(links) {
+/** The links of a memory from GET /links, grouped by type. Null leaves the section out, for a Worker that could not list them. A subject card shows them without buttons, they are changed on the memory. */
+export function linksView(links, actions = true) {
   if (links === null) return "";
   const groups = LINK_TYPES.map((t) => [t, links.filter((l) => shownType(l.type) === t)]).filter(([, rows]) => rows.length);
-  return html`<h3 class="h3">Links</h3>${groups.length ? groups.map(([t, rows]) => html`<h4 class="h3">${t}</h4><ul class="plain links">${rows.map(linkRow)}</ul>`) : html`<p class="muted">No links yet.</p>`}`;
+  return html`<h3 class="h3">Links</h3>${groups.length ? groups.map(([t, rows]) => html`<h4 class="h3">${t}</h4><ul class="plain links">${rows.map((l) => linkRow(l, actions))}</ul>`) : html`<p class="muted">No links yet.</p>`}`;
 }
 
 /** One line of a diff. The marker is drawn by the stylesheet and the words are for a screen reader. */
@@ -69,7 +71,7 @@ export const appendForm = () => html`<form class="stack" data-form="append" aria
 export const linkForm = () => html`<form class="stack row-form" data-form="link" aria-label="Link to another memory"><label class="field">Other memory id<input name="target" required maxlength="64" autocomplete="off"></label><label class="field">Link type<select name="type">${ADDABLE_LINK_TYPES.map((t) => html`<option value="${t}" ${t === "related" ? "selected" : ""}>${t}</option>`)}</select></label><p class="actions"><button type="submit" class="btn btn--primary">Add link</button><button type="button" class="btn" data-action="cancel">Cancel</button></p></form>`;
 
 /** The whole panel for one memory. */
-export function detailView(e, { versions, extras, links, back = hashFor("memories") }, now) {
+export function detailView(e, { versions, extras, links, subjects = [], back = hashFor("memories") }, now) {
   const trashed = e.deleted_at !== null;
   const closed = e.valid_until !== null;
   const purgeAt = extras?.purge_at ?? null; // the Worker's purge time, the same one the Trash list shows
@@ -85,7 +87,7 @@ export function detailView(e, { versions, extras, links, back = hashFor("memorie
     <pre class="text" role="region" aria-label="Memory text" tabindex="0">${e.content}</pre>
     ${tagList(e.tags)}
     ${trashed ? "" : html`<form class="inline-form" data-form="status"><label class="field">Status<select name="status">${STATUSES.map((s) => html`<option value="${s}" ${s === e.status ? "selected" : ""}>${s}</option>`)}</select></label><button type="submit" class="btn">Change status</button></form>`}
-    ${factsView(e, extras, now)}
+    ${factsView(e, extras, now, subjects)}
     ${linksView(links)}
     ${historyView(versions, now)}
   </article>`;
@@ -113,30 +115,28 @@ export function redoUndo(request, id, { isOpen, reload, changed, announce = () =
 }
 
 /**
- * Adds the drawer to a screen. open(id) shows a memory, open("") closes it.
- * @param {{back: () => string, changed: () => void, title: string, closed?: (id: string) => void}} o back is the address that closes it, changed runs after any write so the screen can refresh its list, closed runs after it closes.
+ * The shell every drawer shares: a scrim and a modal panel on the right. While it is open the page behind it is inert, so reading and
+ * focus stay in the panel, and Tab stays inside it. scrimAction names the action a click on the scrim runs, so two drawers on one screen do not answer each other.
+ * @returns {{scrim: HTMLElement, panel: HTMLElement, msg: HTMLElement, body: HTMLElement, shield: (on: boolean) => void}}
  */
-export function mountDrawer(root, ctx, { back, changed, title, closed = () => {} }) {
+export function mountPanel(root, label, scrimAction = "close") {
   const scrim = document.createElement("div");
   scrim.className = "mem__scrim";
-  scrim.dataset.action = "close";
+  scrim.dataset.action = scrimAction;
   scrim.hidden = true;
   const panel = document.createElement("aside");
   panel.className = "mem__panel";
   panel.setAttribute("role", "dialog");
   panel.setAttribute("aria-modal", "true");
-  panel.setAttribute("aria-label", "Memory");
+  panel.setAttribute("aria-label", label);
   panel.hidden = true;
   panel.innerHTML = String(html`<div data-msg></div><div data-body></div>`);
   root.append(scrim, panel);
-  const msg = panel.querySelector("[data-msg]");
-  const body = panel.querySelector("[data-body]");
-  const state = { id: "", entry: null, version: 0 };
 
-  // While the drawer is open the page behind it is inert, so reading and focus stay in the memory. The toasts stay live, so Undo still works.
+  // The toasts stay live, so Undo still works.
   const shielded = new Set();
   // The dialogs (the palette, Remember) stay live, because they open on top of the drawer and an inert dialog cannot take focus.
-  const behind = () => [...document.body.children].filter((el) => el.id !== "toasts" && el.localName !== "dialog" && !el.contains(panel)).concat([...root.children].filter((el) => el !== scrim && el !== panel));
+  const behind = () => [...document.body.children].filter((el) => el.id !== "toasts" && el.localName !== "dialog" && !el.contains(panel)).concat([...root.children].filter((el) => el !== scrim && el !== panel && !el.hidden)); // a hidden drawer on the same screen is left alone, it is shielded only if it is open when another opens on top
   // A route change replaces the whole screen without telling the drawer, so the shield lets go when the drawer's screen is gone.
   const screenGone = () => {
     if (!root.isConnected) shield(false);
@@ -159,6 +159,16 @@ export function mountDrawer(root, ctx, { back, changed, title, closed = () => {}
     if (e.shiftKey && (active === items[0] || !panel.contains(active))) (e.preventDefault(), items.at(-1).focus());
     else if (!e.shiftKey && (active === items.at(-1) || !panel.contains(active))) (e.preventDefault(), items[0].focus());
   });
+  return { scrim, panel, msg: panel.querySelector("[data-msg]"), body: panel.querySelector("[data-body]"), shield };
+}
+
+/**
+ * Adds the drawer to a screen. open(id) shows a memory, open("") closes it.
+ * @param {{back: () => string, changed: () => void, title: string, closed?: (id: string) => void}} o back is the address that closes it, changed runs after any write so the screen can refresh its list, closed runs after it closes.
+ */
+export function mountDrawer(root, ctx, { back, changed, title, closed = () => {} }) {
+  const { scrim, panel, msg, body, shield } = mountPanel(root, "Memory");
+  const state = { id: "", entry: null, version: 0 };
 
   async function loadEntry(message) {
     const q = encodeURIComponent(state.id);
@@ -172,12 +182,12 @@ export function mountDrawer(root, ctx, { back, changed, title, closed = () => {}
       entry = (await attempt(msg, () => ctx.request(`/entry?id=${q}&deleted=1`), undefined, stillOpen))?.entry; // it may be in the trash
       if (!entry) return;
     }
-    const [versions, extras, links] = await Promise.all([ctx.request(`/history?id=${q}`).then((r) => r.versions).catch(() => []), ctx.request(`/ui/api/memory-extras?id=${q}`).catch(() => null), ctx.request(`/links?id=${q}`).then((r) => r.links).catch(() => null)]);
+    const [versions, extras, links, subjects] = await Promise.all([ctx.request(`/history?id=${q}`).then((r) => r.versions).catch(() => []), ctx.request(`/ui/api/memory-extras?id=${q}`).catch(() => null), ctx.request(`/links?id=${q}`).then((r) => r.links).catch(() => null), ctx.request("/subjects").then((r) => r.subjects).catch(() => null)]);
     if (q !== encodeURIComponent(state.id)) return; // the person moved on while this loaded
     state.entry = entry;
     state.version = versions[0]?.seq ?? 0;
     msg.replaceChildren();
-    body.innerHTML = String(detailView(entry, { versions, extras, links, back: back() }, ctx.now()));
+    body.innerHTML = String(detailView(entry, { versions, extras, links, subjects: subjectsOf(links, subjects), back: back() }, ctx.now()));
     document.title = `${titleOf(entry)}, anymem`;
     if (message) notice(message);
   }
