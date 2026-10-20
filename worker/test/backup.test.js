@@ -45,7 +45,10 @@ test("GET /export returns format 2 with every row, byte exact, the trash include
   assert.deepEqual(doc.links.filter((l) => l.made_by === "user").map((l) => l.confidence), [null, null]);
   assert.deepEqual(doc.link_rejections, (await rows(app, "SELECT * FROM link_rejections")).map((r) => ({ ...r })));
   assert.deepEqual([doc.link_rejections[0].source_id, doc.link_rejections[0].link_type], [ids.capture, "about"]);
+  assert.deepEqual(doc.subjects, (await rows(app, "SELECT * FROM subjects ORDER BY id")).map((r) => ({ ...r })));
+  assert.deepEqual(doc.subjects.map((s) => [s.slug, s.kind, s.scope, s.status]).sort(), [["alpha", "project", "shared", "retired"], ["pip", "pet", "private", "active"]]);
   assert.equal(doc.devices.length, 2);
+  assert.deepEqual(doc.devices.map((d) => d.allow_private).sort(), [0, 1], "each device carries its allow_private flag");
   for (const d of doc.devices) assert.match(d.token_hash, /^[0-9a-f]{64}$/);
   assert.ok(doc.devices.some((d) => d.revoked_at !== null));
   assert.ok(!JSON.stringify(doc).includes(token), "the device token is never in an export");
@@ -58,7 +61,7 @@ test("a browser login gets the export without device token hashes, a bearer call
   const browser = await app.call("/export", { jwt: app.browserJwt("me@example.com"), token: null });
   assert.equal(browser.status, 200);
   assert.equal(browser.json.devices.length, 2);
-  for (const d of browser.json.devices) assert.deepEqual(Object.keys(d).sort(), ["created_at", "id", "label", "last_used_at", "revoked_at"]);
+  for (const d of browser.json.devices) assert.deepEqual(Object.keys(d).sort(), ["allow_private", "created_at", "id", "label", "last_used_at", "revoked_at"]);
   assert.ok(!/token_hash/.test(JSON.stringify(browser.json)));
   assert.equal(browser.json.entries.length, 8, "everything else is unchanged");
   assert.equal((await app.call("/export")).json.devices.every((d) => /^[0-9a-f]{64}$/.test(d.token_hash)), true);
@@ -79,6 +82,7 @@ test("GET /export pages by cursor and limit, and the links and devices come with
   assert.deepEqual(pages.map((p) => p.next_cursor === null), [false, false, true]);
   assert.deepEqual(pages.map((p) => p.links.length), [0, 0, 3]);
   assert.deepEqual(pages.map((p) => p.devices.length), [0, 0, 2]);
+  assert.deepEqual(pages.map((p) => p.subjects.length), [0, 0, 2]);
   assert.deepEqual(pages.flatMap((p) => p.entries), full.entries);
   const byKey = (a, b) => (a.memory_id + a.seq < b.memory_id + b.seq ? -1 : 1);
   assert.deepEqual(pages.flatMap((p) => p.versions).sort(byKey), full.versions.sort(byKey));
@@ -128,7 +132,9 @@ test("an export imports into a fresh store and every row matches, field by field
   assert.equal(replies.reduce((n, r) => n + r.imported, 0), 8);
   const [a, b] = [await dump(source), await dump(fresh)];
   for (const table of Object.keys(a)) assert.deepEqual(b[table], a[table], table);
-  assert.ok(a.memories.length === 8 && a.versions.length >= 4 && a.links.length === 3 && a.link_rejections.length === 1 && a.devices.length === 2 && a.questions.length === 2 && a.tags.length > 4);
+  assert.deepEqual(b.devices.map((d) => d.allow_private).sort(), [0, 1], "allow_private is restored as stored");
+  assert.equal(replies.reduce((n, r) => n + r.subjects, 0), 2, "the reply counts the subjects");
+  assert.ok(a.memories.length === 8 && a.versions.length >= 4 && a.links.length === 3 && a.link_rejections.length === 1 && a.subjects.length === 2 && a.devices.length === 2 && a.questions.length === 2 && a.tags.length > 4);
   // the trash and the closed memory kept their times and pointers
   assert.ok(b.memories.some((m) => m.deleted_at !== null));
   assert.ok(b.memories.some((m) => m.valid_until !== null && m.superseded_by !== null));
@@ -306,6 +312,55 @@ test("a backup from before link provenance imports with the defaults, and the ne
   assert.equal((await post({ link_rejections: "x" })).status, 400);
 });
 
+test("a backup from before subjects imports, and a device without allow_private may see private subjects", async () => {
+  const app = await createApp();
+  const mk = (id) => ({ id, content: `text ${id}`, content_hash: id, origin: "import", valid_from: 1, created_at: 1, updated_at: 1, tags: [] });
+  const devices = [{ id: "d1", label: "laptop", token_hash: "a".repeat(64), created_at: 5, last_used_at: null, revoked_at: null }];
+  const [reply] = await restore(app, { format: 2, entries: [mk("m1")], devices });
+  assert.deepEqual([reply.subjects, reply.devices, reply.errors], [0, 1, []]);
+  assert.equal((await row(app, "m1")).id, "m1");
+  assert.deepEqual((await rows(app, "SELECT allow_private FROM devices")).map((d) => d.allow_private), [1]);
+});
+
+test("a subject goes in only with its card memory, a taken slug is skipped, and bad rows are reported", async () => {
+  const app = await createApp();
+  const mk = (id) => ({ id, content: `text ${id}`, content_hash: id, origin: "system", valid_from: 1, created_at: 1, updated_at: 1, tags: ["subject"] });
+  const sub = (id, slug, over = {}) => ({ id, slug, kind: "pet", status: "active", scope: "shared", fields: "{}", aliases: "[]", created_at: 2, updated_at: 3, ...over });
+  const subjects = [
+    sub("m1", "pip"),
+    sub("m2", "pip"),
+    sub("ghost", "ghost"),
+    sub("m3", "cottage", { kind: "house" }),
+    sub("m4", "alpha", { scope: "secret" }),
+    sub("m5", "beta", { fields: "[1]" }),
+    sub("m6", "gamma", { aliases: "{}" }),
+    sub("m7", "delta", { fields: { species: "dog" } }),
+    { id: "m8", slug: "plain", kind: "topic", status: "active", created_at: 2, updated_at: 3 },
+  ];
+  const entries = ["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8"].map(mk);
+  const [reply] = await restore(app, { format: 2, entries, subjects });
+  assert.equal(reply.subjects, 2, "pip and the one with the defaults");
+  assert.deepEqual((await rows(app, "SELECT id, slug FROM subjects ORDER BY id")).map((r) => ({ ...r })), [{ id: "m1", slug: "pip" }, { id: "m8", slug: "plain" }]);
+  assert.deepEqual((await rows(app, "SELECT scope, fields, aliases FROM subjects WHERE id = 'm8'")).map((r) => ({ ...r })), [{ scope: "shared", fields: "{}", aliases: "[]" }]);
+  assert.deepEqual(reply.errors.map((e) => e.id), ["m3", "m4", "m5", "m6", "m7"], "the ghost card is dropped quietly, the malformed rows are reported");
+  assert.equal((await restore(app, { format: 2, entries, subjects }))[0].subjects, 0, "the same document twice adds nothing");
+});
+
+test("subjects come back with the last page, and a bad subjects list or allow_private value is refused", async () => {
+  const source = await createApp();
+  await populate(source);
+  const doc = named(await exportOf(source));
+  const fresh = await createApp();
+  const replies = await restore(fresh, doc, 2);
+  assert.deepEqual(replies.map((r) => r.subjects), [0, 0, 0, 2], "they go in with the last page");
+  assert.deepEqual((await dump(fresh)).subjects, (await dump(source)).subjects);
+  const bad = await fresh.call("/import", { method: "POST", body: { format: 2, entries: [], subjects: "x" } });
+  assert.equal(bad.status, 400);
+  const barred = await createApp();
+  const [two] = await restore(barred, { format: 2, entries: [], devices: [{ id: "d1", label: "x", token_hash: "a".repeat(64), created_at: 5, allow_private: 2 }] });
+  assert.deepEqual([two.devices, two.errors.map((e) => e.id)], [0, ["d1"]]);
+});
+
 test("import is admin only", async () => {
   const app = await createApp();
   const device = (await app.call("/devices", { method: "POST", body: { label: "laptop" } })).json.token;
@@ -407,7 +462,7 @@ test("GET /backup/<day> gives a browser login a copy without device token hashes
   assert.ok(!/token_hash/.test(text), "no token hash anywhere in the browser copy");
   const doc = JSON.parse(text);
   assert.equal(doc.devices.length, 2);
-  for (const d of doc.devices) assert.deepEqual(Object.keys(d).sort(), ["created_at", "id", "label", "last_used_at", "revoked_at"]);
+  for (const d of doc.devices) assert.deepEqual(Object.keys(d).sort(), ["allow_private", "created_at", "id", "label", "last_used_at", "revoked_at"]);
   assert.deepEqual({ ...doc, devices: null }, { ...storedDoc, devices: null }, "everything else is unchanged");
 });
 

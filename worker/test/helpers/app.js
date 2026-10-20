@@ -25,13 +25,39 @@ export async function migratedDb() {
   return db;
 }
 
+/**
+ * The subjects table and the devices.allow_private column, from the SQL of migration 0006 in the phase 3b contract. A no op once
+ * the real migration is in the folder. Not part of migratedDb, so the schema test still compares the migrations with schema.sql alone.
+ */
+export async function withSubjects(db) {
+  if (!db.sqlite.prepare("SELECT 1 FROM sqlite_master WHERE name = 'subjects'").get()) {
+    await db.exec(`CREATE TABLE IF NOT EXISTS subjects (
+      id TEXT PRIMARY KEY,
+      slug TEXT NOT NULL UNIQUE,
+      kind TEXT NOT NULL CHECK (kind IN ('person','pet','asset','project','area','topic')),
+      status TEXT NOT NULL CHECK (status IN ('proposed','active','stale','retired')),
+      scope TEXT NOT NULL DEFAULT 'shared' CHECK (scope IN ('shared','private')),
+      fields TEXT NOT NULL DEFAULT '{}',
+      aliases TEXT NOT NULL DEFAULT '[]',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (id) REFERENCES memories (id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_subjects_kind ON subjects (kind, status);`);
+  }
+  if (!db.sqlite.prepare("SELECT 1 FROM pragma_table_info('devices') WHERE name = 'allow_private'").get()) {
+    await db.exec("ALTER TABLE devices ADD COLUMN allow_private INTEGER NOT NULL DEFAULT 1 CHECK (allow_private IN (0,1))");
+  }
+  return db;
+}
+
 export async function createApp({ env: envOver = {}, withAccess = true } = {}) {
   const issuer = ISSUER;
   const clock = { t: START };
   const fetchFn = certsFetch([issuer]);
   const worker = createWorker({ fetch: fetchFn, now: () => clock.t, cache: createKeyCache() });
   const env = {
-    DB: await migratedDb(),
+    DB: await withSubjects(await migratedDb()),
     VECTORIZE: new FakeVectorize(),
     AI: new FakeAI(),
     BACKUP_BUCKET: new FakeR2(),
