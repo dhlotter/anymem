@@ -11,9 +11,11 @@ Version 2.0.5. This file says how the Worker is built and why. The routes and se
 | `auth.js` | Access JWT check with WebCrypto, bearer and device token check, auth settings. |
 | `http.js` | `HttpError`, JSON replies, bounded body reader, integer query parameters. |
 | `audit.js` | Writes, lists and purges audit rows. |
-| `devices.js` | Device token routes. |
+| `devices.js` | Device token routes, including `POST /devices/private`. |
 | `memory/parse.js` | Frontmatter, hashtags, reserved tags, content hash, the 30,000 character limit. Pure, no database. |
 | `memory/store.js` | The storage layer on D1. `createStore(db, now)` gives create, get, getVersion, update, append, setStatus, softDelete, restore, supersede, undo, history, link and list. |
+| `subjects/store.js`, `subjects/routes.js` | Subjects: the store (create, update, get, list, field checks) and the handlers for `/subject`, `/subject/update`, `/subjects`. See "Subjects" below. |
+| `subjects/private.js` | The one place that decides which memories and subjects a device kept from private subjects may not see. |
 | `memory/diff.js` | The one line summary of what a version changed, used by history. |
 | `memory/routes.js` | The handlers for `/entry`, `/list`, `/history`, `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link`, `/unlink`, `/links`. |
 | `search/chunk.js` | Cuts a memory into chunks (1,600 characters, 200 overlap, at paragraph, sentence or word breaks), builds the search keys, and makes the vector ids. |
@@ -255,7 +257,7 @@ rows older than 90 days.
    `GET /history` works on a trashed memory.
 3. `/restore` works while `now - deleted_at` is at most 14 days. After that it is 410 `restore_window_passed`. A memory
    that is not in the trash is 409 `not_in_trash`. Forgetting a trashed memory returns the same entry and changes nothing.
-4. The nightly `purge_trash` step deletes a memory 14 days after it was trashed, with its rows, tags, keys, links, link rejections, versions, FTS row and vectors.
+4. The nightly `purge_trash` step deletes a memory 14 days after it was trashed, with its rows, tags, keys, links, link rejections, subject row (the foreign key cascade removes it), versions, FTS row and vectors.
 
 ### Validity and lists
 
@@ -268,13 +270,26 @@ rows older than 90 days.
 
 ### Links
 
-1. A link is `(source_id, target_id, link_type)` between two live memories, plus `created_at`, `made_by` (`user` or `system`, default `user`) and `confidence` (a number the system sets, null for a user link). Migration 0005 added the last two. Links that existed before are the user's.
+1. A link is `(source_id, target_id, link_type)` between two live memories, plus `created_at`, `made_by` (`user` or `system`, default `user`) and `confidence` (a number the system sets, null for a user link). Migration 0005 added the last two. Links that existed before are the user's. An `about` link to a subject card makes the memory a member of that subject.
 2. The link types are `about`, `part_of`, `owns`, `affects`, `decided`, `supersedes`, `contradicts`, `derived_from`, `about_person` and `related` (`LINK_TYPES` in `memory/parse.js`). `POST /link` takes any of them except `supersedes` and `derived_from`, which only the system writes. An unknown type is 400 `bad_link_type` and the message lists the types. A reserved type is 400 `reserved_link_type`. Rows with another free text type from before the list stay as they are, and `GET /links` returns the stored type. A client shows a type outside the list as `related`.
 3. `POST /unlink {source_id, target_id, type}` replies `{ok, removed}`. Removing a link with `made_by = 'system'` also inserts `(source_id, target_id, link_type, created_at)` into `link_rejections` in the same batch, so the system never makes that link again. Removing a user link writes no rejection.
 4. A device token may remove only user links. A system link is 403 `admin_only`, and the link stays. A link with either end holding capsule tags or the canonical status is refused to a device token with the same 403 as an edit of that memory (`guardDevice`). The admin token and a browser login may remove any link.
 5. `GET /links?id=` is `{ok, id, links: [{type, direction, other_id, other_name, made_by, confidence, created_at}]}`, sorted by type and then newest first. `direction` is `out` when the memory is the source and `in` when it is the target. Only ends that are not in the trash are listed. An id that exists nowhere is 404. Every token kind that reads memories may call it.
 6. `/link` and `/unlink` audit both memory ids, and `/links` the one id. `/unlink` takes a write slot from a device token like `/link` does.
 7. The trash purge deletes the links and the `link_rejections` rows of a purged memory, in both directions.
+
+## Subjects
+
+A subject is a thing memories are about: a person, pet, asset, project, area or topic. This part is subjects made by hand. Nothing assigns memories to them yet.
+
+1. A subject is a row in `subjects` plus a card, an ordinary memory with the same id. The card holds the brief. It is made through the memory store with origin `system`, type `project`, and the tags `subject`, `subject:<slug>` and `subject-kind:<kind>` (`kind:` is a reserved tag prefix, so the kind tag has another name). Its content is a frontmatter note: name is the slug, description is `<kind> card for <display name>`, the body is the brief. The display name is read back from that description, so it has no column. A card is searchable and versioned like any memory, and only the admin token or a browser login can write one (a device token cannot write origin `system`).
+2. The row holds `slug` (unique, 2 to 40 characters of lowercase letters and digits with single dashes), `kind`, `status` (`proposed`, `active`, `stale`, `retired`), `scope` (`shared` or `private`), `fields` and `aliases` as JSON, and the two times. A subject made by hand starts `active`. `proposed` and `stale` are for later automatic work, and `POST /subject/update` refuses them. Deleting the card cascades to the row, so the trash purge needs no step of its own.
+3. `fields` is `{key: {value, confirmed_at, source}}` with `source` `user` for a value a person set. The keys each kind may hold are `FIELD_KEYS` in `subjects/store.js`. Another key is 400 `bad_field`, and a value is a string of 1 to 200 characters. A person has no health or money key. An update merges: a string sets and confirms the key again, `null` removes it. `aliases` are lowercase names, an update replaces the list, at most 20. The brief and every field value go through the same secret screen as an explicit write.
+4. A memory is a member when an `about` link runs from it to the card (`POST /link`). Members are live memories, newest change first, and `GET /subject` returns at most 200 while `member_count` is the real number. A subject whose card is in the trash is a 404 until the card is restored, and its slug stays taken.
+5. A new brief or name writes a new version of the card through `store.update` (reason `update`), so `/history` and `/undo` work on the card. An undo of the card does not change the subject row, so after one the brief shown by `/subject` follows the card and the name follows its description.
+6. `devices.allow_private` (default 1) says whether a device token may see private subjects. `POST /devices/private` sets it, admin token only. The rule that uses it lives in `subjects/private.js` and exports `hiddenIds`, `canSee` and `visibleOnly`: a memory is hidden from a device kept from private subjects when it is the card of a private subject, or when it has an `about` link to a private subject and none to a non private one. The admin token and a browser login see everything. `GET /subjects` and `GET /subject` call it, and a hidden subject is a 404, never a 403.
+7. The subject routes audit the card id. The write routes are admin only with browser write. The read routes take any token and a browser login.
+8. The `SUBJECTS` variable (`on` or `off`, default off) turns on subject cards in recall. The subject routes ignore it.
 
 ## Reply shapes
 

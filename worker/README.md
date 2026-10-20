@@ -58,6 +58,7 @@ For development, a Wrangler deploy works too.
 | `RERANK` | var | `0` turns the reranker off |
 | `NIGHTLY_SUBREQUESTS` | var | Subrequests the whole nightly run may use. A whole number from 10 to 5000, default 40 (the Free plan). `setup.py` sets 400 when the plan is Paid |
 | `NIGHTLY_WALL_MS` | var | Milliseconds each nightly step may take. A whole number from 1000 to 600000, default 20000. `setup.py` sets 120000 when the plan is Paid |
+| `SUBJECTS` | var | `on` turns on subject cards in recall (`subjects` in the reply). Default `off`. The subject routes work whatever it says |
 | `SMALL_MODEL` | var | The Workers AI model for the small JSON mode jobs (extract, contradiction checks, kind, sensitivity). Default `@cf/meta/llama-3.1-8b-instruct-fast` |
 
 `ALLOWED_HOSTS` is a second layer for a Worker behind a custom domain. If a workers.dev address is ever turned back on, the Worker still refuses it. `setup.py` copies it from the `vars` block of the committed `wrangler.jsonc` on every run, so put it there (or in `wrangler.local.jsonc` for a Wrangler deploy). A value that exists only on the Worker, set by hand, is not read back by `setup.py` and a rerun drops it.
@@ -73,9 +74,10 @@ Every route needs the Access JWT (unless `REQUIRE_ACCESS` is false) and then a b
 | `GET /health` | any, browser | `{ok, version, schema_version, vectorize}`. 503 when the database cannot answer |
 | `GET /count` | any, browser | `{count}`, live memories |
 | `GET /stats` | admin, browser | counts by status and origin, `unvectorized`, `unclassified`, the counters of today and the last 7 days (`capture`, `extract`, `conflicts`, `model_failures`), the last nightly run |
-| `GET /devices` | admin, browser | `{devices}` |
+| `GET /devices` | admin, browser | `{devices}`, each with `allow_private` |
 | `POST /devices` | admin | `{label}` returns `{device, token}` with 201. The token is shown once |
 | `POST /devices/revoke` | admin | `{id}` |
+| `POST /devices/private` | admin | `{id, allow_private}` with a boolean. A device with `allow_private` false never sees a private subject. A browser login is refused (403 `browser_not_allowed`) |
 | `GET /audit` | admin, browser | `since`, `until`, `actor`, `route`, `harness`, `result`, `limit`, `cursor` |
 | `GET /entry`, `GET /list`, `GET /history` | any, browser | read memories |
 | `GET /recall` | any, browser | search |
@@ -83,6 +85,10 @@ Every route needs the Access JWT (unless `REQUIRE_ACCESS` is false) and then a b
 | `POST /update`, `/append`, `/status`, `/forget`, `/restore`, `/undo` | any, browser write | change memories. History is kept on every change |
 | `POST /link`, `POST /unlink` | any, browser write | `{source_id, target_id, type}`. `type` is one of `about`, `part_of`, `owns`, `affects`, `decided`, `contradicts`, `about_person`, `related` (`supersedes` and `derived_from` are the system's, 400 `reserved_link_type`). `/unlink` replies `{ok, removed}`. A device token may remove only a user link, not a system link (403 `admin_only`) |
 | `GET /links` | any, browser | `?id=` returns the links of a memory in both directions with `made_by` and `confidence` |
+| `POST /subject` | admin, browser write | `{slug, kind, name, brief?, fields?, aliases?, scope?}` makes a subject and its card memory, replies `{ok, subject}`. A taken slug is 409 `subject_exists`, a bad slug, kind or field is 400 (`bad_slug`, `bad_kind`, `bad_field`) |
+| `POST /subject/update` | admin, browser write | `{id or slug, name?, brief?, fields?, aliases?, scope?, status?}`. `fields` merge and `null` removes a key. `status` is `active` or `retired`. A new brief or name writes a new version of the card |
+| `GET /subjects` | any, browser | `?kind=&status=&scope=&q=` lists subjects, newest updated first, each with `member_count`. `q` matches slug, name and aliases |
+| `GET /subject` | any, browser | `?slug=` or `?id=` returns the subject with its `brief` and up to 200 `members`. A private subject the caller may not see is a 404 |
 | `POST /extract` | any | `{transcript, known, max}` returns `{proposals}` and stores nothing |
 | `GET /prompt-capsules/core` | any, browser | the capsule, with an ETag and 304 |
 | `GET /export` | admin, browser | the whole store in format 2, or a page of it. A browser login gets it without the device `token_hash` values |

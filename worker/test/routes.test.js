@@ -94,7 +94,7 @@ test("devices, create then list then revoke", async () => {
   assert.match(made.json.token, /^amd_[A-Za-z0-9_-]{43}$/);
   const listed = (await app.call("/devices")).json.devices;
   assert.equal(listed.length, 1);
-  assert.deepEqual(Object.keys(listed[0]).sort(), ["created_at", "id", "label", "last_used_at"]);
+  assert.deepEqual(Object.keys(listed[0]).sort(), ["allow_private", "created_at", "id", "label", "last_used_at"]);
   assert.ok(!JSON.stringify(listed).includes(made.json.token));
   const gone = await app.call("/devices/revoke", { method: "POST", body: { id: made.json.device.id } });
   assert.deepEqual(gone.json, { ok: true, id: made.json.device.id });

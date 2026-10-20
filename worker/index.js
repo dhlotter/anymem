@@ -11,9 +11,10 @@ import { cleanLabel, listAudit, recordAudit } from "./audit.js";
 import { takeModelSlot, takeWriteSlot, writeRefused } from "./limits.js";
 import { downloadBackupRoute, exportRoute, listBackupsRoute, runBackupRoute } from "./backup/backup.js";
 import { runMaintenance, runMaintenanceRoute } from "./cron/maintenance.js";
-import { createDevice, listDevices, revokeDevice } from "./devices.js";
+import { createDevice, listDevices, revokeDevice, setDevicePrivate } from "./devices.js";
 import { HttpError, errorResponse, json, notFound } from "./http.js";
 import { append, forget, getEntry, getLinks, history, link, listEntries, restore, setStatus, undo, unlink, update } from "./memory/routes.js";
+import { createSubject, getSubject, listSubjects, updateSubject } from "./subjects/routes.js";
 import { harnessRoute, importRoute, questionsRoute, reindexRoute } from "./admin/routes.js";
 import { extractRoute } from "./extract/extract.js";
 import { readProbe, startProbe } from "./search/probe.js";
@@ -36,6 +37,7 @@ const ROUTES = [
   { method: "GET", path: "/devices", admin: true, browser: true, handler: listDevices },
   { method: "POST", path: "/devices", admin: true, handler: createDevice },
   { method: "POST", path: "/devices/revoke", admin: true, handler: revokeDevice },
+  { method: "POST", path: "/devices/private", admin: true, handler: setDevicePrivate },
   { method: "GET", path: "/audit", admin: true, browser: true, handler: listAudit },
   { method: "GET", path: "/entry", browser: true, handler: getEntry },
   { method: "GET", path: "/list", browser: true, handler: listEntries },
@@ -51,6 +53,10 @@ const ROUTES = [
   { method: "POST", path: "/link", browserWrite: true, writes: true, handler: link },
   { method: "POST", path: "/unlink", browserWrite: true, writes: true, handler: unlink },
   { method: "GET", path: "/links", browser: true, handler: getLinks },
+  { method: "POST", path: "/subject", admin: true, browserWrite: true, writes: true, handler: createSubject },
+  { method: "POST", path: "/subject/update", admin: true, browserWrite: true, writes: true, handler: updateSubject },
+  { method: "GET", path: "/subjects", browser: true, handler: listSubjects },
+  { method: "GET", path: "/subject", browser: true, handler: getSubject },
   { method: "GET", path: "/recall", browser: true, model: true, handler: getRecall },
   { method: "POST", path: "/admin/reindex", admin: true, handler: reindexRoute },
   { method: "POST", path: "/admin/questions", admin: true, handler: questionsRoute },
