@@ -67,7 +67,7 @@ An example config that keeps capture on but away from private folders.
 
 ## How to delete
 
-1. **One memory.** `forget.py ID` moves it to the trash, where it stays 14 days and `restore.py ID` brings it back. After that the nightly job deletes it for good, with its tags, versions, links and vectors.
+1. **One memory.** `forget.py ID` moves it to the trash, where it stays 14 days and `restore.py ID` brings it back. After that the nightly job deletes it for good, with its tags, versions, links, link rejections and vectors.
 2. **An automatic capture.** `forget.py ID` does the same. `list.py --origin capture` lists them.
 3. **Everything you stored.** `uninstall.py --delete-resources` deletes the Worker, the Access application and service token, the Vectorize index and the D1 database that setup recorded, including every memory in them. It asks you to type `delete`. The R2 backup bucket is kept unless you add `--include-backups`. Back up first if you might want them again. See [install](install.md).
 4. **The local files.** Uninstall leaves your client config in place. Delete `~/.config/anymem/` and `~/.cache/anymem/` yourself. The capture log and `failed.jsonl` hold memory text, so remove them if you do not want it kept.

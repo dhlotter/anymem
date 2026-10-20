@@ -1,5 +1,5 @@
 // Export format v2. The whole store as one JSON document: every memory (the trash too) with its tags, every version,
-// the model written question keys, the links and the devices. Search keys and vectors are not part of it, a restore
+// the model written question keys, the links, the link rejections and the devices. Search keys and vectors are not part of it, a restore
 // rebuilds them with the reindex route. Device tokens are only ever stored as hashes, so no token is in an export.
 //
 // Two ways to read it. exportStore returns one object, a whole store or one page. exportText yields the same document as
@@ -73,13 +73,14 @@ async function relatedRows(db, ids) {
   return { versions: versions.results, questions: questions.results };
 }
 
-/** The links and the devices, which every whole export and the last page carry. */
+/** The links, the link rejections and the devices, which every whole export and the last page carry. */
 async function linksAndDevices(db) {
-  const [links, devices] = await db.batch([
-    db.prepare("SELECT source_id, target_id, link_type, created_at FROM links ORDER BY source_id, target_id, link_type"),
+  const [links, rejections, devices] = await db.batch([
+    db.prepare("SELECT source_id, target_id, link_type, created_at, made_by, confidence FROM links ORDER BY source_id, target_id, link_type"),
+    db.prepare("SELECT source_id, target_id, link_type, created_at FROM link_rejections ORDER BY source_id, target_id, link_type"),
     db.prepare("SELECT id, label, token_hash, created_at, last_used_at, revoked_at FROM devices ORDER BY created_at, id"),
   ]);
-  return { links: links.results, devices: devices.results };
+  return { links: links.results, link_rejections: rejections.results, devices: devices.results };
 }
 
 /**
@@ -115,7 +116,7 @@ export async function exportStore(db, now, { cursor = null, keyed = false, offse
     if (rows.length < want) break;
   }
   const more = keyed ? Boolean(position && (await hasAfter(db, position))) : offset + seen < total.n;
-  const tail = more ? { links: [], devices: [] } : await linksAndDevices(db);
+  const tail = more ? { links: [], link_rejections: [], devices: [] } : await linksAndDevices(db);
   return {
     ok: true,
     format: FORMAT,
@@ -127,6 +128,7 @@ export async function exportStore(db, now, { cursor = null, keyed = false, offse
     next_cursor: keyed && more && lastRow ? cursorOf(lastRow) : null,
     ...out,
     links: tail.links,
+    link_rejections: tail.link_rejections,
     devices: tail.devices,
   };
 }
@@ -187,5 +189,5 @@ export async function* exportText(db, now) {
   yield '],"questions":[';
   yield* rowPieces(db, { select: "SELECT memory_id, position, text, created_at FROM memory_keys", where: "key_type = 'question'", k1: "memory_id", k2: "position", chunk: QUESTION_CHUNK });
   const tail = await linksAndDevices(db);
-  yield `],"next_offset":null,"next_cursor":null,"links":${JSON.stringify(tail.links)},"devices":${JSON.stringify(tail.devices)}}`;
+  yield `],"next_offset":null,"next_cursor":null,"links":${JSON.stringify(tail.links)},"link_rejections":${JSON.stringify(tail.link_rejections)},"devices":${JSON.stringify(tail.devices)}}`;
 }

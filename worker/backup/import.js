@@ -1,7 +1,7 @@
 // Import of export format v2 (a backup or GET /export). Idempotent by id: a memory that exists is skipped whole, with its
 // versions and questions, so sending a page twice changes nothing. Rows are stored as they are, so ids, times, validity,
 // the trash time and the content come back exactly. Search keys are not imported. After the last page call /admin/reindex.
-// The links and the devices go in with the page that reaches the end of the entries list.
+// The links, the link rejections and the devices go in with the page that reaches the end of the entries list.
 import { badRequest, HttpError } from "../http.js";
 import { FTS_INSERT } from "../memory/store.js";
 import { memoryIdFits } from "../search/chunk.js";
@@ -76,13 +76,31 @@ function statementsFor(db, entry, values, versions, questions) {
   return out;
 }
 
+/** A backup from before link provenance has no made_by or confidence, so the defaults apply: a user link, no confidence. */
 async function importLinks(db, links) {
   let added = 0;
   for (let i = 0; i < links.length; i += LINK_BATCH) {
     const statements = links.slice(i, i + LINK_BATCH).map((l) => {
       if (![l?.source_id, l?.target_id, l?.link_type].every((v) => typeof v === "string" && v) || !isTime(l.created_at)) throw badRequest("A link needs source_id, target_id, link_type and created_at.");
+      if (l.made_by !== undefined && l.made_by !== "user" && l.made_by !== "system") throw badRequest("made_by must be user or system.");
+      if (l.confidence !== undefined && l.confidence !== null && typeof l.confidence !== "number") throw badRequest("confidence must be a number or null.");
       return db
-        .prepare("INSERT OR IGNORE INTO links (source_id, target_id, link_type, created_at) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM memories WHERE id = ?) AND EXISTS (SELECT 1 FROM memories WHERE id = ?)")
+        .prepare("INSERT OR IGNORE INTO links (source_id, target_id, link_type, created_at, made_by, confidence) SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM memories WHERE id = ?) AND EXISTS (SELECT 1 FROM memories WHERE id = ?)")
+        .bind(l.source_id, l.target_id, l.link_type, l.created_at, l.made_by ?? "user", l.confidence ?? null, l.source_id, l.target_id);
+    });
+    added += (await db.batch(statements)).reduce((n, r) => n + r.meta.changes, 0);
+  }
+  return added;
+}
+
+/** The links the user turned down, which an older backup does not have. */
+async function importLinkRejections(db, rejections) {
+  let added = 0;
+  for (let i = 0; i < rejections.length; i += LINK_BATCH) {
+    const statements = rejections.slice(i, i + LINK_BATCH).map((l) => {
+      if (![l?.source_id, l?.target_id, l?.link_type].every((v) => typeof v === "string" && v) || !isTime(l.created_at)) throw badRequest("A link rejection needs source_id, target_id, link_type and created_at.");
+      return db
+        .prepare("INSERT OR IGNORE INTO link_rejections (source_id, target_id, link_type, created_at) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM memories WHERE id = ?) AND EXISTS (SELECT 1 FROM memories WHERE id = ?)")
         .bind(l.source_id, l.target_id, l.link_type, l.created_at, l.source_id, l.target_id);
     });
     added += (await db.batch(statements)).reduce((n, r) => n + r.meta.changes, 0);
@@ -128,7 +146,7 @@ async function importDevices(db, devices, errors, reactivate, now) {
 export async function importV2(env, body, { offset, limit }, memoryIds) {
   const db = env.DB;
   if (!Array.isArray(body.entries)) throw badRequest("entries must be a list.");
-  const lists = Object.fromEntries(["versions", "questions", "links", "devices"].map((k) => [k, body[k] ?? []]));
+  const lists = Object.fromEntries(["versions", "questions", "links", "link_rejections", "devices"].map((k) => [k, body[k] ?? []]));
   for (const [k, v] of Object.entries(lists)) if (!Array.isArray(v)) throw badRequest(`${k} must be a list.`);
   const reactivate = body.reactivate_devices ?? [];
   if (!Array.isArray(reactivate) || !reactivate.every((x) => typeof x === "string")) throw badRequest("reactivate_devices must be a list of device ids.");
@@ -170,13 +188,15 @@ export async function importV2(env, body, { offset, limit }, memoryIds) {
 
   const remaining = Math.max(0, body.entries.length - nextOffset);
   let links = 0;
+  let linkRejections = 0;
   let devices = 0;
   let reactivated = [];
   if (remaining === 0) {
     links = await importLinks(db, lists.links);
+    linkRejections = await importLinkRejections(db, lists.link_rejections);
     const dev = await importDevices(db, lists.devices, errors, reactivate, Date.now());
     devices = dev.changes;
     reactivated = dev.reactivated;
   }
-  return { ok: true, format: 2, ...counts, links, devices, reactivated_devices: reactivated, errors, next_offset: nextOffset, remaining };
+  return { ok: true, format: 2, ...counts, links, link_rejections: linkRejections, devices, reactivated_devices: reactivated, errors, next_offset: nextOffset, remaining };
 }

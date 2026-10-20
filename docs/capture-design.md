@@ -78,7 +78,7 @@ Only memories with origin `capture` ever go on probation. Explicit, profile, per
 2. **One recall makes a capture safe from rule 3.** Once its 60 days have passed, the nightly job clears `probation_until` on a capture that has been recalled at least once, and it ranks normally. Only a recall that counts adds to the count, which is one the prompt hook or `recall.py` sends with `count=1` and the Worker marks relevant. Checks and benchmarks send `count=0`.
 3. **Never recalled in 60 days, to the trash.** A capture with no recall at all that is 60 days old or older goes to the trash with the reason `retire_never_recalled`.
 4. **An idle project note, to the trash.** A capture of type `project` with no recall in 90 days (measured from its last recall, or from its creation if it never had one) goes to the trash with the reason `retire_idle_project`.
-5. **The trash keeps it 14 days.** `restore.py ID` brings it back in that time. After 14 days the nightly job deletes it, with its tags, keys, links, versions and vectors.
+5. **The trash keeps it 14 days.** `restore.py ID` brings it back in that time. After 14 days the nightly job deletes it, with its tags, keys, links, link rejections, versions and vectors.
 
 Ending probation changes one column. It writes no version and does not touch `updated_at`.
 
