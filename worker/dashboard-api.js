@@ -2,6 +2,7 @@
 import { foldByHarness } from "./harnesses.js";
 import { badRequest, forbidden, json, notFound, readJson } from "./http.js";
 import { createStore, TRASH_WINDOW_MS } from "./memory/store.js";
+import { hiddenIds } from "./subjects/private.js";
 import { LIVE, stats } from "./system.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -122,6 +123,10 @@ export async function memoryExtras({ env, url, actor, memoryIds }) {
     env.DB.prepare("SELECT MIN(ts) AS first FROM recall_log"),
   ]);
   if (!row.results.length) throw notFound("No memory with that id.");
+  // The links carry the names of their other ends, so a device without private access gets the same cut as GET /links.
+  const linked = [...out.results.map((l) => ({ ...l, direction: "out" })), ...into.results.map((l) => ({ ...l, direction: "in" }))];
+  const hidden = await hiddenIds(env.DB, [id, ...linked.map((l) => l.id)], actor);
+  if (hidden.has(id)) throw notFound("No memory with that id.");
   memoryIds.push(id);
   const found = saved.results[0];
   const who = !found ? null : found.actor_kind === "device" ? found.label || "A device that was removed" : found.actor_kind === "admin" ? "The admin token" : "The dashboard";
@@ -130,7 +135,7 @@ export async function memoryExtras({ env, url, actor, memoryIds }) {
     ok: true,
     probation_until: row.results[0].probation_until,
     purge_at: trashedAt === null ? null : trashedAt + TRASH_WINDOW_MS, // when a trashed memory goes for good, from the Worker's own window
-    links: [...out.results.map((l) => ({ ...l, direction: "out" })), ...into.results.map((l) => ({ ...l, direction: "in" }))],
+    links: hidden.size ? linked.filter((l) => !hidden.has(l.id)) : linked,
     ...(actor.kind === "device" ? {} : { saved_by: found ? { at: found.ts, by: who, kind: found.actor_kind, script: found.script } : null }),
     recalled_by: foldByHarness(used.results.map((r) => ({ harness: r.harness, times: r.n })), ["times"]),
     recall_log_since: log.results[0].first,
