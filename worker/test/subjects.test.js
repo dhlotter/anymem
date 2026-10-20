@@ -289,8 +289,7 @@ test("POST /devices/private sets the flag, GET /devices shows it, and only the a
   assert.equal((await post(app, "/devices/private", { id: made.id, allow_private: false })).status, 404, "a revoked device is not found");
 });
 
-// The stub in subjects/private.js hides nothing, so this one cannot pass until the real rule replaces it. The integrator removes `todo`.
-test("needs the real private.js: a device kept from private subjects gets 404 for a private subject and no row in the list", { todo: "needs the real private.js" }, async () => {
+test("a device kept from private subjects gets 404 for a private subject and no row in the list", async () => {
   const app = await createApp();
   const { device: kept, token } = await device(app);
   await add(app);

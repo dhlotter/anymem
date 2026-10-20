@@ -1,7 +1,7 @@
 // Import of export format v2 (a backup or GET /export). Idempotent by id: a memory that exists is skipped whole, with its
 // versions and questions, so sending a page twice changes nothing. Rows are stored as they are, so ids, times, validity,
 // the trash time and the content come back exactly. Search keys are not imported. After the last page call /admin/reindex.
-// The links, the link rejections and the devices go in with the page that reaches the end of the entries list.
+// The links, the link rejections, the subjects and the devices go in with the page that reaches the end of the entries list.
 import { badRequest, HttpError } from "../http.js";
 import { FTS_INSERT } from "../memory/store.js";
 import { memoryIdFits } from "../search/chunk.js";
@@ -11,6 +11,8 @@ const PARALLEL = 10;
 const MAX_ERRORS = 20;
 const LINK_BATCH = 100;
 const HASH = /^[0-9a-f]{64}$/;
+const SUBJECT_KINDS = ["person", "pet", "asset", "project", "area", "topic"];
+const SUBJECT_STATUSES = ["proposed", "active", "stale", "retired"];
 const REQUIRED_TEXT = ["id", "content", "content_hash"];
 const OPTIONAL_TEXT = ["name", "description", "body", "harness", "session", "project"];
 const REQUIRED_TIME = ["valid_from", "created_at", "updated_at"];
@@ -108,10 +110,50 @@ async function importLinkRejections(db, rejections) {
   return added;
 }
 
+/** The text of a subjects.fields or subjects.aliases column when it holds JSON of the wanted shape, else null. A missing one takes the column default. */
+function jsonColumn(value, fallback, isArray) {
+  if (value === undefined) return fallback;
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) === isArray && parsed !== null && typeof parsed === "object" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The subjects. A row goes in only when its card memory is in the store by now, so a card that was not imported takes its
+ * subject with it. A slug that is taken already is skipped. A backup from before subjects has none.
+ * Returns the number of rows added.
+ */
+async function importSubjects(db, subjects, errors) {
+  const statements = [];
+  for (const s of subjects) {
+    const id = typeof s?.id === "string" ? s.id.slice(0, 64) : null;
+    const scope = s?.scope ?? "shared";
+    const fields = jsonColumn(s?.fields, "{}", false);
+    const aliases = jsonColumn(s?.aliases, "[]", true);
+    if (!id || typeof s.slug !== "string" || !s.slug || !SUBJECT_KINDS.includes(s.kind) || !SUBJECT_STATUSES.includes(s.status) || !["shared", "private"].includes(scope) || fields === null || aliases === null || !isTime(s.created_at) || !isTime(s.updated_at)) {
+      errors.push({ id, error: "A subject needs id, slug, a kind and status it knows, scope shared or private, fields as a JSON object, aliases as a JSON list, created_at and updated_at." });
+    } else {
+      statements.push(
+        db
+          .prepare("INSERT OR IGNORE INTO subjects (id, slug, kind, status, scope, fields, aliases, created_at, updated_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM memories WHERE id = ?)")
+          .bind(id, s.slug, s.kind, s.status, scope, fields, aliases, s.created_at, s.updated_at, id),
+      );
+    }
+  }
+  let added = 0;
+  for (let i = 0; i < statements.length; i += LINK_BATCH) added += (await db.batch(statements.slice(i, i + LINK_BATCH))).reduce((n, r) => n + r.meta.changes, 0);
+  return added;
+}
+
 /**
  * A device comes back revoked unless the admin named it in reactivate. A backup taken before a revocation still shows the
  * device as active, so a restore must not revive it silently. A device already revoked in the backup keeps its time.
  * Returns the number of rows added and the ids that came back active, which is what the admin asked for.
+ * allow_private comes back as stored, and a backup from before it has none, which means the device may see private subjects.
  */
 async function importDevices(db, devices, errors, reactivate, now) {
   const statements = [];
@@ -122,13 +164,15 @@ async function importDevices(db, devices, errors, reactivate, now) {
       errors.push({ id, error: "A device is only imported with its token hash, never with the token." });
     } else if (!id || typeof d.label !== "string" || !HASH.test(d.token_hash ?? "") || !isTime(d.created_at) || [d.last_used_at, d.revoked_at].some((t) => t !== undefined && t !== null && !isTime(t))) {
       errors.push({ id, error: "A device needs id, label, created_at and a token_hash that is a 64 character SHA-256 hex digest." });
+    } else if (d.allow_private !== undefined && d.allow_private !== 0 && d.allow_private !== 1) {
+      errors.push({ id, error: "A device's allow_private must be 0 or 1." });
     } else {
       let revokedAt = d.revoked_at ?? now;
       if (reactivate.includes(d.id)) {
         revokedAt = d.revoked_at ?? null;
         if (revokedAt === null) reactivated.push(id);
       }
-      statements.push(db.prepare("INSERT OR IGNORE INTO devices (id, label, token_hash, created_at, last_used_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?)").bind(id, d.label, d.token_hash, d.created_at, d.last_used_at ?? null, revokedAt));
+      statements.push(db.prepare("INSERT OR IGNORE INTO devices (id, label, token_hash, created_at, last_used_at, revoked_at, allow_private) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(id, d.label, d.token_hash, d.created_at, d.last_used_at ?? null, revokedAt, d.allow_private ?? 1));
     }
   }
   if (!statements.length) return { changes: 0, reactivated };
@@ -146,7 +190,7 @@ async function importDevices(db, devices, errors, reactivate, now) {
 export async function importV2(env, body, { offset, limit }, memoryIds) {
   const db = env.DB;
   if (!Array.isArray(body.entries)) throw badRequest("entries must be a list.");
-  const lists = Object.fromEntries(["versions", "questions", "links", "link_rejections", "devices"].map((k) => [k, body[k] ?? []]));
+  const lists = Object.fromEntries(["versions", "questions", "links", "link_rejections", "subjects", "devices"].map((k) => [k, body[k] ?? []]));
   for (const [k, v] of Object.entries(lists)) if (!Array.isArray(v)) throw badRequest(`${k} must be a list.`);
   const reactivate = body.reactivate_devices ?? [];
   if (!Array.isArray(reactivate) || !reactivate.every((x) => typeof x === "string")) throw badRequest("reactivate_devices must be a list of device ids.");
@@ -189,14 +233,16 @@ export async function importV2(env, body, { offset, limit }, memoryIds) {
   const remaining = Math.max(0, body.entries.length - nextOffset);
   let links = 0;
   let linkRejections = 0;
+  let subjects = 0;
   let devices = 0;
   let reactivated = [];
   if (remaining === 0) {
     links = await importLinks(db, lists.links);
     linkRejections = await importLinkRejections(db, lists.link_rejections);
+    subjects = await importSubjects(db, lists.subjects, errors);
     const dev = await importDevices(db, lists.devices, errors, reactivate, Date.now());
     devices = dev.changes;
     reactivated = dev.reactivated;
   }
-  return { ok: true, format: 2, ...counts, links, link_rejections: linkRejections, devices, reactivated_devices: reactivated, errors, next_offset: nextOffset, remaining };
+  return { ok: true, format: 2, ...counts, links, link_rejections: linkRejections, subjects, devices, reactivated_devices: reactivated, errors, next_offset: nextOffset, remaining };
 }

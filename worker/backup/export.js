@@ -1,5 +1,5 @@
 // Export format v2. The whole store as one JSON document: every memory (the trash too) with its tags, every version,
-// the model written question keys, the links, the link rejections and the devices. Search keys and vectors are not part of it, a restore
+// the model written question keys, the links, the link rejections, the subjects and the devices. Search keys and vectors are not part of it, a restore
 // rebuilds them with the reindex route. Device tokens are only ever stored as hashes, so no token is in an export.
 //
 // Two ways to read it. exportStore returns one object, a whole store or one page. exportText yields the same document as
@@ -73,19 +73,20 @@ async function relatedRows(db, ids) {
   return { versions: versions.results, questions: questions.results };
 }
 
-/** The links, the link rejections and the devices, which every whole export and the last page carry. */
-async function linksAndDevices(db) {
-  const [links, rejections, devices] = await db.batch([
+/** The links, the link rejections, the subjects and the devices, which every whole export and the last page carry. */
+async function tailRows(db) {
+  const [links, rejections, subjects, devices] = await db.batch([
     db.prepare("SELECT source_id, target_id, link_type, created_at, made_by, confidence FROM links ORDER BY source_id, target_id, link_type"),
     db.prepare("SELECT source_id, target_id, link_type, created_at FROM link_rejections ORDER BY source_id, target_id, link_type"),
-    db.prepare("SELECT id, label, token_hash, created_at, last_used_at, revoked_at FROM devices ORDER BY created_at, id"),
+    db.prepare("SELECT id, slug, kind, status, scope, fields, aliases, created_at, updated_at FROM subjects ORDER BY id"),
+    db.prepare("SELECT id, label, token_hash, created_at, last_used_at, revoked_at, allow_private FROM devices ORDER BY created_at, id"),
   ]);
-  return { links: links.results, link_rejections: rejections.results, devices: devices.results };
+  return { links: links.results, link_rejections: rejections.results, subjects: subjects.results, devices: devices.results };
 }
 
 /**
  * Export the store, or one page of it. A keyed page starts after the cursor (or at the start) and gives next_cursor. An
- * unkeyed page starts at an offset and gives next_offset. The links and the devices come with the last page.
+ * unkeyed page starts at an offset and gives next_offset. The links, the subjects and the devices come with the last page.
  * @param {any} db
  * @param {() => number} now
  * @param {{cursor?: string | null, keyed?: boolean, offset?: number, limit?: number | null}} [page] limit null means everything, which is refused above EXPORT_CAP when capped is set
@@ -116,7 +117,7 @@ export async function exportStore(db, now, { cursor = null, keyed = false, offse
     if (rows.length < want) break;
   }
   const more = keyed ? Boolean(position && (await hasAfter(db, position))) : offset + seen < total.n;
-  const tail = more ? { links: [], link_rejections: [], devices: [] } : await linksAndDevices(db);
+  const tail = more ? { links: [], link_rejections: [], subjects: [], devices: [] } : await tailRows(db);
   return {
     ok: true,
     format: FORMAT,
@@ -129,6 +130,7 @@ export async function exportStore(db, now, { cursor = null, keyed = false, offse
     ...out,
     links: tail.links,
     link_rejections: tail.link_rejections,
+    subjects: tail.subjects,
     devices: tail.devices,
   };
 }
@@ -188,6 +190,6 @@ export async function* exportText(db, now) {
   yield* rowPieces(db, { select: "SELECT memory_id, seq, snapshot, reason, created_at FROM memory_versions", k1: "memory_id", k2: "seq" });
   yield '],"questions":[';
   yield* rowPieces(db, { select: "SELECT memory_id, position, text, created_at FROM memory_keys", where: "key_type = 'question'", k1: "memory_id", k2: "position", chunk: QUESTION_CHUNK });
-  const tail = await linksAndDevices(db);
-  yield `],"next_offset":null,"next_cursor":null,"links":${JSON.stringify(tail.links)},"link_rejections":${JSON.stringify(tail.link_rejections)},"devices":${JSON.stringify(tail.devices)}}`;
+  const tail = await tailRows(db);
+  yield `],"next_offset":null,"next_cursor":null,"links":${JSON.stringify(tail.links)},"link_rejections":${JSON.stringify(tail.link_rejections)},"subjects":${JSON.stringify(tail.subjects)},"devices":${JSON.stringify(tail.devices)}}`;
 }
