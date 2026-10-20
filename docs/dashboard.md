@@ -18,7 +18,7 @@ The address bar uses hash routes, so each screen has a link you can bookmark. Fi
 | Activity | `#/activity` | What the system did on its own, newest first, as a table. Memories replaced by a newer fact, merged by the nightly job, and retired by the probation rules. The What and Now headers filter by kind and by where the memory stands. Each row has an Undo while undo still works, and a row opens the memory in a drawer |
 | Trash | `#/trash` | Memories forgotten in the last 14 days, as a table, the closest to the end first or the newest forgotten first. Origin and project filter it, a row opens the memory in a drawer, and Restore is on each row |
 | Capsule | `#/capsule` | The text that opens every session. A size figure with a word for how full it is, a ruler of the 9,500 character cap (also where the session start hook cuts the text), a table of the sections with each one's share and the standard slots that nothing fills, and the text as the hook joins it, with Copy. A section opens its memory in a drawer, where it can be edited |
-| People | `#/people` | Changes waiting for you, one line each with the value now and the value proposed, then the profile and each person note as tables. A row opens its memory in a drawer |
+| Profile | `#/people` | Changes waiting for you, one line each with the value now and the value proposed, then the profile as a table. A row opens its memory in a drawer. The people you talk about are subjects of kind person, on the Subjects screen |
 | Subjects | `#/subjects` | The things your memories are about, such as a pet, a car or a project, as a table. The Subject header filters by name or alias, Kind, Status and Scope have a funnel, and Subject, Members and Changed sort. A row opens the subject in a drawer, and New subject makes one. Described below |
 | Health | `#/health` | The checks. The nightly job as a grid of steps over the last runs. Database and vector size against the plan. The write limit by token. Captures proposed, screened out, saved and refused for 14 days. Backups with a download. Counts by status, origin, kind and project |
 | Audit | `#/audit` | The Worker's audit trail as a table, with the filter in the column headers for caller (the ones seen lately, named by the Worker), route, result and time, and calls per day. No memory text is shown |
@@ -57,7 +57,7 @@ This phase makes subjects by hand. Adding a memory to a subject is a link of typ
 
 ## What it can write
 
-A browser login may change memories only through the routes the screens use, `/capture`, `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link`, `/unlink`, `/subject` and `/subject/update`. Through `/capture` it may only save profile and person notes, which is what the People screen needs. It cannot create device tokens, import, reindex, run the nightly job or run a backup. Each write must come from the dashboard's own page. See [security](security.md) for the checks.
+A browser login may change memories only through the routes the screens use, `/capture`, `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link`, `/unlink`, `/subject` and `/subject/update`. Through `/capture` it may only save profile and person notes, which is what the Profile screen needs. It cannot create device tokens, import, reindex, run the nightly job or run a backup. Each write must come from the dashboard's own page. See [security](security.md) for the checks.
 
 The insight routes only read. A test checks that calling each of them changes no table except the audit trail.
 

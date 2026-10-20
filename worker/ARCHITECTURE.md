@@ -1,6 +1,6 @@
 # Worker architecture
 
-Version 2.0.6. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
+Version 2.0.7. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
 
 ## Module map
 
@@ -96,7 +96,7 @@ made with a browser login is only accepted when the request proves it came from 
 
 Routes with `browserWrite: true`: `/capture`, `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link`, `/unlink`.
 `/capture` is wrapped by `profileSavesOnly`. A browser may only save `origin` or `source` of `profile` or `person`
-through it (403 `browser_capture_scope` otherwise), because that is all the People screen needs. Every other write route has neither flag, so it stays bearer only. That covers
+through it (403 `browser_capture_scope` otherwise), because that is all the Profile screen needs. Every other write route has neither flag, so it stays bearer only. That covers
 `/devices`, `/devices/revoke`, `/import`, `/backup/run`, `/admin/reindex`, `/admin/questions`, `/admin/harness`, `/admin/run-maintenance` and `/extract`.
 The audit actor for a browser write is `browser` with the email. Reads need none of the three rules.
 
@@ -162,7 +162,7 @@ credentials.
 | `ui/screens/activity.js` | `#/activity`. `GET /ui/api/activity`, undo through `POST /undo` |
 | `ui/screens/trash.js` | `#/trash`. `GET /list?deleted=1`, the last 14 days, restore |
 | `ui/screens/capsule.js` | `#/capsule`. `GET /prompt-capsules/core` and `/entry` for the name of each source |
-| `ui/screens/people.js` | `#/people`. `GET /ui/api/people`. Accept writes the field into the profile memory (`/update`, or `/capture` with `source: profile` when there is none) then forgets the pending item. Dismiss forgets it, with an undo |
+| `ui/screens/people.js` | The Profile screen, `#/people`. `GET /ui/api/people`. Accept writes the field into the profile memory (`/update`, or `/capture` with `source: profile` when there is none) then forgets the pending item. Dismiss forgets it, with an undo |
 | `ui/screens/health.js` | `#/health`. `/ui/api/home`, `overview`, `usage`, `runs`, `token-expiry` and `GET /backup` |
 | `ui/screens/audit.js` | `#/audit`. `GET /audit` and `/ui/api/audit-facets` |
 

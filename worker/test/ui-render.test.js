@@ -10,7 +10,7 @@ import { capsuleText, capsuleView } from "../ui/screens/capsule.js";
 import { auditRows, stripView } from "../ui/screens/audit.js";
 import { backupsView, capacityView, capturesView, checksView, countsView, limitView, runsView } from "../ui/screens/health.js";
 import { askView, figuresView, growthView, headView, latestView, probationView, quietView, recallsView, sourcesView, statusView, toolRows, toolsView, toolTable, usageView } from "../ui/screens/home.js";
-import { pendingView, peopleView, profileView } from "../ui/screens/people.js";
+import { pendingView, profileView } from "../ui/screens/people.js";
 import { listView as subjectListView, newForm, tableRow as subjectRow } from "../ui/screens/subjects.js";
 import { aliasForm, briefForm, fieldsForm, subjectView } from "../ui/lib/subject-drawer.js";
 import { hitView, injectedView, resultsView, rulesView, searchForm } from "../ui/screens/search.js";
@@ -198,7 +198,6 @@ function views(t) {
     ["capsuleView", capsuleView(capsule, names, NOW)],
     ["profileView", profileView(profile)],
     ["pendingView", pendingView([pending, entry(t)], { phone: { value: t.script, note: "" } }, NOW)],
-    ["peopleView", peopleView([entry(t)])],
     ["checksView", checksView(home.checks)],
     ["runsView", runsView(runs, NOW)],
     ["capacityView", capacityView(usage, { configured: true, expires: t.script, days_left: 3 })],
@@ -232,7 +231,7 @@ test("no view lets store text add a tag or an attribute", () => {
   const nasty = views(EVIL);
   const benign = views(BENIGN);
   assert.equal(nasty.length, benign.length);
-  assert.ok(nasty.length >= 78, `${nasty.length} views are covered`);
+  assert.ok(nasty.length >= 77, `${nasty.length} views are covered`);
   nasty.forEach(([name, view], i) => {
     const got = parse(String(view), name);
     assert.deepEqual(got, parse(String(benign[i][1]), name), `${name} has different tags or attributes with hostile text`);

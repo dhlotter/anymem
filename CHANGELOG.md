@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.7] 2026-10-20
+
+People fold into Subjects. A person is a subject of kind person, so the People screen no longer lists them.
+
+1. **Dashboard.** The People screen is now Profile, with your own facts and the changes waiting for you. The people you talk about are on the Subjects screen, filter Kind to person. The address `#/people` still works.
+2. **Existing people.** Run `scripts/subjects-from-people.mjs` (dry run first) to make a subject for each saved person memory.
+
 ## [2.0.6] 2026-10-20
 
 Subjects, made by hand. A subject is a thing memories are about, a person, a pet, an asset, a project, an area or a topic. It has a card (a memory holding a short brief), fields, aliases and a scope. Nothing files memories under a subject by itself yet, you link a memory to a card with an `about` link. Migration 0006.
