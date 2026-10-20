@@ -1,0 +1,6 @@
+{
+  "name": "anymem",
+  "version": "1.0.0",
+  "description": "Shared memory for AI coding agents, stored in your own Cloudflare account.",
+  "contextFileName": "skills/anymem/SKILL.md"
+}

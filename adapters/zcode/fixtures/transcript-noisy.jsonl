@@ -1,0 +1,10 @@
+{"message": {"content": [{"text": "You are a coding agent.", "type": "text"}], "role": "system"}}
+{"message": {"content": [{"text": "<system-reminder>\nSessionStart hook additional context: \n#1\n## Memory capsule (anymem Worker, live)\nAlways-on rules.\n</system-reminder>", "type": "text"}], "role": "user"}}
+{"message": {"content": [{"text": "Which database do we use for sessions?", "type": "text"}, {"text": "<system-reminder>\nUserPromptSubmit hook additional context: \n#1\n## Relevant memories (anymem, recalled for this prompt)\n- sessions-db: sessions live in D1\n</system-reminder>", "type": "text"}], "role": "user"}}
+{"message": {"content": [{"text": "hidden reasoning", "type": "thinking"}, {"text": "Checking the config first.", "type": "text"}, {"id": "call_1", "input": {"command": "cat wrangler.jsonc"}, "name": "Bash", "type": "tool_use"}], "role": "assistant"}}
+{"message": {"content": [{"content": "d1_databases: [sessions]", "tool_use_id": "call_1", "type": "tool_result"}], "role": "user"}}
+{"message": {"content": [{"text": "raw tool output", "type": "text"}], "role": "tool"}}
+{"message": {"content": "Sessions use D1.", "role": "assistant"}}
+{"message": {"content": "A Claude layout record with a top level type."}, "type": "user"}
+{"message": {"content": [{"text": "developer note", "type": "text"}], "role": "developer"}}
+{"message": {"content": [{"text": "## Relevant memories (anymem, recalled for this prompt)\n- injected on its own, must never be captured", "type": "text"}], "role": "user"}}

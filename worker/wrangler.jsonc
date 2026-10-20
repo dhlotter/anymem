@@ -1,0 +1,24 @@
+{
+  "name": "REPLACE_WITH_WORKER_NAME",
+  "main": "index.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "REPLACE_WITH_HOSTNAME", "custom_domain": true }],
+  "d1_databases": [{ "binding": "DB", "database_name": "REPLACE_WITH_D1_NAME", "database_id": "REPLACE_WITH_D1_ID" }],
+  "vectorize": [{ "binding": "VECTORIZE", "index_name": "REPLACE_WITH_VECTORIZE_INDEX" }],
+  "ai": { "binding": "AI" },
+  "r2_buckets": [{ "binding": "BACKUP_BUCKET", "bucket_name": "REPLACE_WITH_R2_BUCKET" }],
+  "assets": { "directory": "./ui", "binding": "ASSETS", "run_worker_first": true, "html_handling": "none", "not_found_handling": "none" },
+  "triggers": { "crons": ["0 1 * * *"] },
+  "vars": {
+    "REQUIRE_ACCESS": "true",
+    "RECALL_MIN_SIM": "0.75",
+    "RERANK_MIN": "0.2",
+    "ACCESS_TEAM_DOMAIN": "REPLACE_WITH_TEAM.cloudflareaccess.com",
+    "ACCESS_AUD": "REPLACE_WITH_ACCESS_AUD",
+    "ACCESS_SERVICE_COMMON_NAMES": "REPLACE_WITH_SERVICE_TOKEN_CLIENT_ID.access",
+    "ACCESS_ALLOWED_EMAILS": "REPLACE_WITH_YOUR_EMAIL",
+    "ACCESS_TOKEN_EXPIRES": "REPLACE_WITH_YYYY-MM-DD"
+  }
+}

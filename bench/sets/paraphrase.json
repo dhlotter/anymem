@@ -1,0 +1,29 @@
+[
+ {
+  "placeholder": "PLACEHOLDER SEED, not real data. The real paraphrase set is paraphrase.local.json next to this file (gitignored, so it never reaches the repo). Replace the rows below with prompts and the memory names they should find in your own store, then delete this row. Rows without a q are ignored, and a default run skips a set while this row exists."
+ },
+ {
+  "q": "how do we deploy the example service to staging",
+  "exp": [
+   "example-deploy-steps"
+  ]
+ },
+ {
+  "q": "which branch name pattern do we use for fixes",
+  "exp": [
+   "example-branch-naming"
+  ]
+ },
+ {
+  "q": "where do the nightly reports get written",
+  "exp": [
+   "example-report-location"
+  ]
+ },
+ {
+  "q": "what is the retry policy for the sample client",
+  "exp": [
+   "example-retry-policy"
+  ]
+ }
+]

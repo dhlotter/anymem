@@ -1,0 +1,16 @@
+{
+  "cwd": "/tmp/zcode-throwaway/workspace",
+  "hookEventName": "SessionStart",
+  "hook_event_name": "SessionStart",
+  "mode": "yolo",
+  "model": "fake-provider/fake-model",
+  "permission_mode": "yolo",
+  "sessionId": "sess_00000000-0000-4000-8000-000000000001",
+  "session_id": "sess_00000000-0000-4000-8000-000000000001",
+  "source": "startup",
+  "timestamp": "2026-10-08T11:25:28.445Z",
+  "traceId": "00000000-0000-4000-8000-0000000000aa",
+  "transcriptPath": "/tmp/zcode-claude-hook-AbC123/transcript.jsonl",
+  "transcript_path": "/tmp/zcode-claude-hook-AbC123/transcript.jsonl",
+  "turnId": "turn_00000000-0000-4000-8000-0000000000bb"
+}

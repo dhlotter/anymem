@@ -1,0 +1,10 @@
+[
+ {"placeholder": "PLACEHOLDER SEED, not real data. Replace this file with the 100 labelled prompts from session logs and delete this row. Rows without a q are ignored by bench.py and recall_gate.py, and a default run skips the set while this row exists. exp [] means the prompt should inject nothing."},
+ {"q": "what do we know about the placeholder deploy process for the example service", "exp": ["placeholder-memory-one"]},
+ {"q": "remind me which placeholder rule applies to the example commit messages", "exp": ["placeholder-memory-two", "placeholder-memory-three"]},
+ {"q": "how did we decide to handle the placeholder retry logic in the example client", "exp": ["placeholder-memory-four"]},
+ {"q": "where does the example report get written when the placeholder job finishes", "exp": ["placeholder-memory-five"]},
+ {"q": "write a function that returns the sum of a list of integers", "exp": []},
+ {"q": "what is the boiling point of water at sea level in celsius", "exp": []},
+ {"q": "rename the variable tmp to result in this snippet and show the diff", "exp": []}
+]

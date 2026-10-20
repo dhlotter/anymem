@@ -1,0 +1,22 @@
+[
+ {"q": "how do I reverse a singly linked list in python", "exp": []},
+ {"q": "what is the capital city of Mongolia", "exp": []},
+ {"q": "explain the difference between TCP and UDP in simple terms", "exp": []},
+ {"q": "give me a recipe for banana bread without eggs", "exp": []},
+ {"q": "what causes the northern lights", "exp": []},
+ {"q": "write a haiku about autumn rain", "exp": []},
+ {"q": "how many ounces are in a pound", "exp": []},
+ {"q": "summarise the plot of Romeo and Juliet in three sentences", "exp": []},
+ {"q": "what is the time complexity of quicksort in the average case", "exp": []},
+ {"q": "translate good morning into Japanese and Swahili", "exp": []},
+ {"q": "which planet has the most moons", "exp": []},
+ {"q": "how do I stretch my hamstrings after running", "exp": []},
+ {"q": "what does the borrow checker do in Rust", "exp": []},
+ {"q": "suggest names for a golden retriever puppy", "exp": []},
+ {"q": "how does photosynthesis work", "exp": []},
+ {"q": "convert 72 degrees fahrenheit to celsius", "exp": []},
+ {"q": "what is the difference between a virus and a bacterium", "exp": []},
+ {"q": "explain how a binary search tree is balanced", "exp": []},
+ {"q": "list three good books about the Roman Empire", "exp": []},
+ {"q": "how do I make cold brew coffee at home", "exp": []}
+]

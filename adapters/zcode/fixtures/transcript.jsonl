@@ -1,0 +1,2 @@
+{"message": {"content": [{"text": "Reply with the single word OK", "type": "text"}], "role": "user"}}
+{"message": {"content": [{"text": "OK", "type": "text"}], "role": "assistant"}}

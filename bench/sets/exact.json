@@ -1,0 +1,23 @@
+[
+ {
+  "placeholder": "PLACEHOLDER SEED, not real data. The real exact set is exact.local.json next to this file (gitignored, so it never reaches the repo). Replace the rows below with prompts and the memory names they should find in your own store, then delete this row. Rows without a q are ignored, and a default run skips a set while this row exists."
+ },
+ {
+  "q": "EX-101",
+  "exp": [
+   "example-ticket-notes"
+  ]
+ },
+ {
+  "q": "what do we know about ExampleCache",
+  "exp": [
+   "example-cache-notes"
+  ]
+ },
+ {
+  "q": "EX-205",
+  "exp": [
+   "example-incident-notes"
+  ]
+ }
+]

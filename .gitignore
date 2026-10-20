@@ -1,0 +1,40 @@
+.DS_Store
+__pycache__/
+node_modules
+.env
+.dev.vars
+.claude/
+.worktrees/
+.wrangler/
+
+# Local files of the old setup that may still sit in an existing clone. They can hold real resource ids or memories,
+# so they stay ignored even though nothing tracked uses them any more.
+deploy-personal.sh
+worker-configuration.d.ts
+server/
+.anymem/
+devharness/
+.ux-harness/
+.eval-cache/
+.cursor/
+docs/superpowers/
+
+# worker/wrangler.jsonc has placeholders. A copy named wrangler.local.jsonc (or any wrangler.*.jsonc) holds real resource ids.
+wrangler.*.jsonc
+
+# A database export or a local database holds somebody's memories and must never be committed.
+# The Worker's own schema and migrations are the only SQL files that belong in the repo.
+*.sql
+!worker/db/schema.sql
+!worker/db/migrations/*.sql
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+
+# Real prompts for the recall benchmark are personal text from session logs, kept on the machine only.
+bench/sets/*.local.json
+
+# Output of claude plugin eval.
+evals/results/

@@ -1,0 +1,266 @@
+# Generated 2026-10-10 from a full-history gitleaks triage (44 raw, 28 unique, zero real secrets).
+# Each value is pinned to the rule id and the exact files that carry it, so the same value elsewhere still fails.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^\.github/workflows/installer-release\.yml$''',
+]
+regexes = ['''2E6810CAE5BDCD94''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/eval/local-ai\.ts$''',
+]
+regexes = ['''6710678b12670bc442b99edc952c4d996ae309a7020c1fa0096dd245c2faf790''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/eval/local-ai\.ts$''',
+]
+regexes = ['''7e4c1cc848840aeccdd763458c18dd525eb0f795c992e00ebe9c28554e7db2d4''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/eval/local-ai\.ts$''',
+]
+regexes = ['''8c785abebea9ae3257b61681b4e6fd8365ceafde980c21970d001e834cf10835''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/eval/local-ai\.ts$''',
+]
+regexes = ['''9261e7d79b44c8195c1cada2b453e55b00aeb81e907a6664974b4d7776172ab3''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/eval/local-ai\.ts$''',
+]
+regexes = ['''9eb652ac4e40cc093272bbbe0f55d521cf67570060227109b5cdc20945a4489e''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["gcp-api-key"]
+paths = [
+  '''^test/unit/claude-code-hooks\.test\.ts$''',
+]
+regexes = ['''AIzaSyD\-1234567890abcdefghijklmnopqrstu''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/budget/t7-push-subrequest-budget\.test\.ts$''',
+  '''^test/integration/push-routes\.test\.ts$''',
+  '''^test/integration/push-send\.test\.ts$''',
+  '''^test/integration/quarantine-readers\.test\.ts$''',
+  '''^test/integration/sync-push-shared-fetch-budget\.test\.ts$''',
+  '''^test/unit/push-crypto\.test\.ts$''',
+  '''^test/unit/push-daily-kv-write-cap\.test\.ts$''',
+  '''^test/unit/push-wording\.test\.ts$''',
+]
+regexes = ['''BTBZMqHH6r4Tts7J_aSIgg''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/fixtures/quarantine/signals\.jsonl$''',
+]
+regexes = ['''CIBTQLGjtlydLqrpukUO2Xt1rdbgQudNKF4h2cp5/DSZsOmoKTGH5mMsGsVsCVWweYaGOpRP/QjQzWJCHkkNweevolxL2j/6oRjJduUdUvORXNySPJufVOiSCrjFNl/nMK6uy9cMcT6m/dmD0JB2OX0h4jXcFVoiAkFK1B76SUGa9\+PQN0iMxGGoN/fX2fiCw5rMUq6/0e8dQZHh/nbpdtrV225rZaVb5Ke4ItTNPtwFaUGbnHi/TyI9Hq/95M6o''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/integration/hooks-injected-context\.test\.ts$''',
+]
+regexes = ['''MIIEvQIBADANBgkqhkiG9w0BAQEFAASC''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/unit/push-crypto\.test\.ts$''',
+]
+regexes = ['''Snr3JMxaHVDXHWJn5wdC52WjpCtd2EIEGBykDcZW32k''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["curl-auth-header"]
+paths = [
+  '''^README\.md$''',
+]
+regexes = ['''YOUR\-TOKEN''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["curl-auth-header"]
+paths = [
+  '''^README\.md$''',
+]
+regexes = ['''YOUR_TOKEN''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/eval/local-ai\.ts$''',
+]
+regexes = ['''a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/integration/hooks-injected-context\.test\.ts$''',
+]
+regexes = ['''abcd1234efgh5678''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^integrations/cursor-hooks/fixtures/real-shape-transcript\.jsonl$''',
+  '''^integrations/cursor-hooks/fixtures/sample-transcript\.jsonl$''',
+  '''^test/unit/claude-code-hooks\.test\.ts$''',
+]
+regexes = ['''abcdef1234567890''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/unit/claude-code-hooks\.test\.ts$''',
+]
+regexes = ['''abcdefgh12345678\.''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/eval/local-ai\.ts$''',
+]
+regexes = ['''b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/eval/local-ai\.ts$''',
+]
+regexes = ['''d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/eval/local-ai\.ts$''',
+]
+regexes = ['''d5469a60db23249c7f8945013d78df30b44b6bf686c6bb4740f4223f77b1b535''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["jwt"]
+paths = [
+  '''^test/integration/hooks-injected-context\.test\.ts$''',
+]
+regexes = ['''eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["github-oauth"]
+paths = [
+  '''^test/unit/claude-code-hooks\.test\.ts$''',
+]
+regexes = ['''gho_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["github-pat"]
+paths = [
+  '''^test/unit/claude-code-hooks\.test\.ts$''',
+]
+regexes = ['''ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/unit/claude-code-hooks\.test\.ts$''',
+]
+regexes = ['''hunter2\-abcdefgh''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/unit/push-crypto\.test\.ts$''',
+]
+regexes = ['''kyrL1jIIOHEzg3sM2ZWRHDRB62YACZhhSlknJ672kSs''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["stripe-access-token"]
+paths = [
+  '''^test/integration/hooks-injected-context\.test\.ts$''',
+]
+regexes = ['''rk_live_51Habcdefghijklmnop''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^test/unit/claude-code-hooks\.test\.ts$''',
+]
+regexes = ['''sb_live_9f2c1a4e7b3d''']
+condition = "AND"
+
+[[allowlists]]
+description = "Test fixture value, pinned to its rule and its files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^integrations/cursor-hooks/fixtures/real-shape-transcript\.jsonl$''',
+  '''^integrations/cursor-hooks/fixtures/sample-transcript\.jsonl$''',
+]
+regexes = ['''sk\-abcdef1234567890ABCDEF''']
+condition = "AND"

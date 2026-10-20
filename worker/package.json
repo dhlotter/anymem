@@ -1,0 +1,13 @@
+{
+  "name": "anymem-worker",
+  "version": "2.0.3",
+  "private": true,
+  "type": "module",
+  "description": "The anymem v2 Worker. Plain JavaScript, no dependencies.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "migrate": "node migrate.js",
+    "deploy": "wrangler deploy --config wrangler.local.jsonc"
+  }
+}

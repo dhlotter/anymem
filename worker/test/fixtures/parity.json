@@ -1,0 +1,37 @@
+{
+  "rule": { "id": "expire-backups-30d", "prefix": "backups/", "max_age_seconds": 2592000 },
+  "lifecycle": [
+    { "name": "no rules yet", "current": [], "changed": true },
+    {
+      "name": "the backup rule is already right",
+      "current": [{ "id": "expire-backups-30d", "enabled": true, "conditions": { "prefix": "backups/" }, "deleteObjectsTransition": { "condition": { "type": "Age", "maxAge": 2592000 } } }],
+      "changed": false
+    },
+    {
+      "name": "the keys in another order are still right",
+      "current": [{ "deleteObjectsTransition": { "condition": { "maxAge": 2592000, "type": "Age" } }, "conditions": { "prefix": "backups/" }, "enabled": true, "id": "expire-backups-30d" }],
+      "changed": false
+    },
+    {
+      "name": "another rule is kept and the backup rule is added",
+      "current": [{ "id": "logs", "enabled": true, "conditions": { "prefix": "logs/" }, "deleteObjectsTransition": { "condition": { "type": "Age", "maxAge": 86400 } } }],
+      "changed": true
+    },
+    {
+      "name": "a backup rule with the wrong age is replaced",
+      "current": [{ "id": "expire-backups-30d", "enabled": true, "conditions": { "prefix": "backups/" }, "deleteObjectsTransition": { "condition": { "type": "Age", "maxAge": 86400 } } }],
+      "changed": true
+    },
+    {
+      "name": "a disabled backup rule is replaced",
+      "current": [{ "id": "expire-backups-30d", "enabled": false, "conditions": { "prefix": "backups/" }, "deleteObjectsTransition": { "condition": { "type": "Age", "maxAge": 2592000 } } }],
+      "changed": true
+    },
+    {
+      "name": "a backup rule that also aborts uploads is replaced",
+      "current": [{ "id": "expire-backups-30d", "enabled": true, "conditions": { "prefix": "backups/" }, "deleteObjectsTransition": { "condition": { "type": "Age", "maxAge": 2592000 } }, "abortMultipartUploadsTransition": { "condition": { "type": "Age", "maxAge": 86400 } } }],
+      "changed": true
+    }
+  ],
+  "migrations_current": [0, 1, 2]
+}

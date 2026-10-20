@@ -1,0 +1,15 @@
+{
+  "cwd": "/tmp/zcode-throwaway/workspace",
+  "hookEventName": "UserPromptSubmit",
+  "hook_event_name": "UserPromptSubmit",
+  "mode": "yolo",
+  "permission_mode": "yolo",
+  "prompt": "Reply with the single word OK",
+  "sessionId": "sess_00000000-0000-4000-8000-000000000001",
+  "session_id": "sess_00000000-0000-4000-8000-000000000001",
+  "timestamp": "2026-10-08T11:25:28.482Z",
+  "traceId": "00000000-0000-4000-8000-0000000000aa",
+  "transcriptPath": "/tmp/zcode-claude-hook-AbC123/transcript.jsonl",
+  "transcript_path": "/tmp/zcode-claude-hook-AbC123/transcript.jsonl",
+  "turnId": "turn_00000000-0000-4000-8000-0000000000bb"
+}

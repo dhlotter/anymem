@@ -1,0 +1,11 @@
+{
+  "session_id": "019aaaaa-0000-7000-8000-000000000001",
+  "turn_id": "019aaaaa-0000-7000-8000-0000000000a1",
+  "transcript_path": "/tmp/work/codex/sessions/2026/10/08/rollout-2026-10-08T00-00-00-019aaaaa-0000-7000-8000-000000000001.jsonl",
+  "cwd": "/tmp/work/ws",
+  "hook_event_name": "Stop",
+  "model": "gpt-5.5",
+  "permission_mode": "bypassPermissions",
+  "stop_hook_active": false,
+  "last_assistant_message": "OK"
+}

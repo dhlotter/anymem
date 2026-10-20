@@ -1,0 +1,17 @@
+[
+ {
+  "placeholder": "PLACEHOLDER SEED, not real data. The real tails set is tails.local.json next to this file (gitignored, so it never reaches the repo). Replace the rows below with prompts and the memory names they should find in your own store, then delete this row. Rows without a q are ignored, and a default run skips a set while this row exists."
+ },
+ {
+  "q": "how do we deploy the example service to staging? Use bullet points and keep the answer under fifty words.",
+  "exp": [
+   "example-deploy-steps"
+  ]
+ },
+ {
+  "q": "which branch name pattern do we use for fixes? Explain briefly. If nothing relevant is found, say so.",
+  "exp": [
+   "example-branch-naming"
+  ]
+ }
+]

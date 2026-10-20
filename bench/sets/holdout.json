@@ -1,0 +1,23 @@
+[
+ {
+  "placeholder": "PLACEHOLDER SEED, not real data. The real holdout set is holdout.local.json next to this file (gitignored, so it never reaches the repo). Replace the rows below with prompts and the memory names they should find in your own store, then delete this row. Rows without a q are ignored, and a default run skips a set while this row exists."
+ },
+ {
+  "q": "remind me how releases get tagged",
+  "exp": [
+   "example-release-tagging"
+  ]
+ },
+ {
+  "q": "what does the sample linter complain about most",
+  "exp": [
+   "example-linter-rules"
+  ]
+ },
+ {
+  "q": "who owns the example billing job",
+  "exp": [
+   "example-billing-owner"
+  ]
+ }
+]

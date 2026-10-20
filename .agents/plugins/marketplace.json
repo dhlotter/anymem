@@ -1,0 +1,20 @@
+{
+  "name": "anymem",
+  "interface": {
+    "displayName": "Anymem"
+  },
+  "plugins": [
+    {
+      "name": "anymem",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

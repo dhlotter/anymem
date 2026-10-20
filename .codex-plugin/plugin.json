@@ -1,0 +1,25 @@
+{
+  "name": "anymem",
+  "version": "2.0.3",
+  "description": "Shared memory for AI coding agents, stored in your own Cloudflare account. Recall on every prompt, capture at the end of a session, one memory store across every machine.",
+  "author": {
+    "name": "Anymem contributors"
+  },
+  "license": "MIT",
+  "keywords": ["memory", "recall", "agents", "cloudflare", "semantic-search", "skill"],
+  "skills": "./skills/",
+  "hooks": "./adapters/codex/hooks.json",
+  "interface": {
+    "displayName": "Anymem",
+    "shortDescription": "Shared memory across agents and machines",
+    "longDescription": "Recall what you decided before, remember corrections and preferences, and keep one memory store on your own Cloudflare account.",
+    "developerName": "Anymem contributors",
+    "category": "Productivity",
+    "capabilities": ["Instructions", "Lifecycle hooks"],
+    "defaultPrompt": [
+      "Remember this for next time.",
+      "What do you remember about this project?",
+      "Check that anymem is working."
+    ]
+  }
+}

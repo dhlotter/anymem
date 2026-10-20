@@ -1,0 +1,20 @@
+{
+  "cwd": "/tmp/zcode-throwaway/workspace",
+  "hookEventName": "Stop",
+  "hook_event_name": "Stop",
+  "last_assistant_message": "OK",
+  "mode": "yolo",
+  "permission_mode": "yolo",
+  "responsePreview": "OK",
+  "responseText": "OK",
+  "sessionId": "sess_00000000-0000-4000-8000-000000000001",
+  "session_id": "sess_00000000-0000-4000-8000-000000000001",
+  "stopHookActive": false,
+  "stop_hook_active": false,
+  "timestamp": "2026-10-08T11:25:29.209Z",
+  "toolCallCount": 0,
+  "traceId": "00000000-0000-4000-8000-0000000000aa",
+  "transcriptPath": "/tmp/zcode-claude-hook-AbC123/transcript.jsonl",
+  "transcript_path": "/tmp/zcode-claude-hook-AbC123/transcript.jsonl",
+  "turnId": "turn_00000000-0000-4000-8000-0000000000bb"
+}

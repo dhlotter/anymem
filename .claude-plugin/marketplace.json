@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "anymem",
+  "description": "Shared memory for AI coding agents, on your own Cloudflare account.",
+  "owner": {
+    "name": "Anymem contributors"
+  },
+  "plugins": [
+    {
+      "name": "anymem",
+      "description": "Recall on every prompt, capture at the end of a session, one memory store across machines and harnesses.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

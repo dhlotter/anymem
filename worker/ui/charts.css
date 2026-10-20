@@ -1,0 +1,29 @@
+/* Charts. Hand written SVG, coloured by class. Thin marks, hairline grid, a 2px gap between touching marks, text in text colours. */
+.chart { position: relative; margin-block: var(--space-sm) var(--space-xs); min-width: 0; }
+.chart__plot { min-width: 0; border-radius: var(--radius-md); outline-offset: 4px; }
+.chart__plot[hidden], [data-table][hidden] { display: none; }
+.plot { display: block; width: 100%; max-width: 100%; height: auto; overflow: visible; }
+.plot .grid { stroke: var(--color-rule); stroke-width: 1; }
+.plot .tick, .plot .peak { fill: var(--color-muted); font: 400 var(--text-sm) var(--font-body); font-variant-numeric: tabular-nums; }
+.plot .peak { fill: var(--color-ink-2); font-weight: 700; }
+.plot .hit { fill: transparent; }
+.plot .col.is-on .hit { fill: var(--color-paper-3); }
+.plot .seg { fill: var(--series-n); }
+.plot .seg.s1 { fill: var(--series-1); } .plot .seg.s2 { fill: var(--series-2); } .plot .seg.s3 { fill: var(--series-3); }
+.plot .seg.s4 { fill: var(--series-4); } .plot .seg.s5 { fill: var(--series-5); } .plot .seg.s6 { fill: var(--series-6); } .plot .seg.sn { fill: var(--series-n); }
+.legend { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-xs) var(--space-md); font-size: var(--text-sm); color: var(--color-ink-2); }
+.legend li { display: inline-flex; align-items: center; gap: var(--space-xs); }
+.tip { position: fixed; z-index: var(--z-tooltip); pointer-events: none; padding: var(--space-xs) var(--space-sm); background: var(--color-toast); color: var(--color-toast-ink); border-radius: var(--radius-md); font-size: var(--text-sm); line-height: 1.4; white-space: nowrap; }
+.tip[hidden] { display: none; }
+.tip__head { font-weight: 700; margin-bottom: var(--space-2xs); }
+.tip__row { font-variant-numeric: tabular-nums; }
+.sbar { display: block; width: 100%; max-width: 9rem; height: 0.5rem; margin-top: var(--space-2xs); }
+.sbar__track { fill: var(--color-paper-3); }
+.sbar__fill { fill: var(--color-accent); }
+.sbar--soon .sbar__fill { fill: var(--color-warn); }
+.ruler { display: block; width: 100%; height: auto; margin-top: var(--space-xs); overflow: visible; }
+.ruler__track { fill: var(--color-paper-3); }
+.ruler__seg--a { fill: var(--color-accent); }
+.ruler__seg--b { fill: var(--color-ink-2); }
+.ruler__cap { stroke: var(--color-ink); stroke-width: 2; }
+.ruler__label { fill: var(--color-muted); font: 400 var(--text-sm) var(--font-body); }

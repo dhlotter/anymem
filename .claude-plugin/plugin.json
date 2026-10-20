@@ -1,0 +1,25 @@
+{
+  "name": "anymem",
+  "version": "2.0.3",
+  "description": "Shared memory for AI coding agents, stored in your own Cloudflare account. Recall on every prompt, capture at the end of a session, one memory store across every machine.",
+  "author": {
+    "name": "Anymem contributors"
+  },
+  "license": "MIT",
+  "keywords": ["memory", "recall", "agents", "cloudflare", "semantic-search", "skill"],
+  "userConfig": {
+    "url": {
+      "type": "string",
+      "title": "Worker URL",
+      "description": "Address of your anymem Worker. Leave empty and run the anymem skill's setup script to create one.",
+      "required": false
+    },
+    "token": {
+      "type": "string",
+      "title": "Access token",
+      "description": "Bearer token for your anymem Worker. Stored in the secure credential store.",
+      "sensitive": true,
+      "required": false
+    }
+  }
+}
