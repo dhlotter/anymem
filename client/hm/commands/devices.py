@@ -1,4 +1,4 @@
-"""`devices.py list | add LABEL | revoke ID`: per device tokens (admin token required)."""
+"""`devices.py list | add LABEL | revoke ID | allow-private ID on|off`: per device tokens (admin token required)."""
 from __future__ import annotations
 
 import os
@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from hm import api, config, share
 
 COMMAND = "devices"
-HELP = "list, add and revoke per device tokens (needs the admin token)"
+HELP = "list, add and revoke per device tokens, and choose which may see private subjects (needs the admin token)"
 
 
 def register(parser):
@@ -20,6 +20,9 @@ def register(parser):
     add.add_argument("--share", action="store_true", help="write one connection string with the address, this token and the Access pair to the file, for connect on the new machine")
     revoke = sub.add_parser("revoke", help="stop a device token working immediately")
     revoke.add_argument("id", metavar="ID", help="the device id from `devices list` (a unique prefix is enough)")
+    private = sub.add_parser("allow-private", help="let a device see private subjects (on) or keep them from it (off). A device is on until set off")
+    private.add_argument("id", metavar="ID", help="the device id from `devices list` (a unique prefix is enough)")
+    private.add_argument("state", metavar="on|off", choices=("on", "off"))
 
 
 def _clean(text):
@@ -40,7 +43,8 @@ def _list():
         print("no devices yet. Add one with `devices.py add LABEL`.")
         return 0
     for d in devices:
-        print("%s  %-20s created %s  last used %s" % (_clean(d["id"]), _clean(d["label"]), _when(d.get("created_at")), _when(d.get("last_used_at"))))
+        print("%s  %-20s created %s  last used %s%s" % (_clean(d["id"]), _clean(d["label"]), _when(d.get("created_at")), _when(d.get("last_used_at")),
+                                                      "  private subjects off" if d.get("allow_private") is False else ""))
     return 0
 
 
@@ -90,12 +94,21 @@ def _revoke(prefix):
     return 0
 
 
+def _allow_private(prefix, state):
+    device_id = _resolve(prefix)
+    api.request("POST", "/devices/private", {"id": device_id, "allow_private": state == "on"})
+    print("%s %s see private subjects" % (device_id, "may now" if state == "on" else "can no longer"))
+    return 0
+
+
 def run(ns):
     try:
         if ns.devices_action == "list":
             return _list()
         if ns.devices_action == "add":
             return _add(ns.label, getattr(ns, "share", False))
+        if ns.devices_action == "allow-private":
+            return _allow_private(ns.id, ns.state)
         return _revoke(ns.id)
     except (api.NotConfigured, api.ApiError, api.NetworkError) as e:
         print(f"anymem: {e}", file=sys.stderr)

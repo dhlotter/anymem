@@ -67,6 +67,7 @@ class FakeWorker:
             "vprobe": None,  # POST /vectorize-probe: None is the v2 Worker's answer, an ApiError 404 is the old Worker
             "vread": "filtered",  # GET /vectorize-probe: a mode, or a list with one mode per poll, the last repeating
             "backup": {"ok": True, "backups": [], "latest": {"day": date.today().isoformat(), "entries": 42, "size": 1000, "key": "k"}},
+            "subjects": api.ApiError(404, "not found"),  # GET /subjects: an older Worker has no such route
             "stats": {"count": 42, "by_status": {"active": 40, "canonical": 2}, "unvectorized": 2, "unclassified": 5,
                       "capture": {"accepted": 3, "rejected": 1, "reasons": {"secret": 1}}, "last_run": {"job": "nightly", "ok": True, "summary": {}}},
         }
@@ -124,6 +125,8 @@ class FakeWorker:
             return self._answer(self.b["stats"])
         if path == "/backup":
             return self._answer(self.b["backup"])
+        if path == "/subjects":
+            return self._answer(self.b["subjects"])
         raise AssertionError("unexpected call %s %s" % (method, path))
 
     def forgets(self):
@@ -413,6 +416,24 @@ check("usage unexpected shape: warning, no crash", status(checks, "usage").statu
 w = FakeWorker(health=api.NetworkError("timed out"))
 checks, rc, out = scenario("usage skipped when unreachable", w)
 check("usage skipped when unreachable: no /stats call", status(checks, "usage").status == "skip" and not any(c[1] == "/stats" for c in w.calls))
+
+# 19. subjects from GET /subjects: one info line with the counts, and no line at all when the Worker does not answer
+w = FakeWorker(subjects={"ok": True, "subjects": [{"slug": "pip", "status": "active", "scope": "private"}, {"slug": "corolla", "status": "active", "scope": "shared"},
+                                                   {"slug": "old-cat", "status": "retired", "scope": "private"}]})
+checks, rc, out = scenario("subjects", w)
+check("subjects: one info line with the active and the private count, exit 0", status(checks, "subjects").status == "info" and status(checks, "subjects").detail == "2 active, 2 private"
+      and "info  subjects       2 active, 2 private" in out and rc == 0)
+w = FakeWorker(subjects={"ok": True, "subjects": []})
+checks, rc, out = scenario("subjects none", w)
+check("subjects: a Worker with none says 0 active, 0 private", status(checks, "subjects").detail == "0 active, 0 private")
+for label, answer in (("older Worker", api.ApiError(404, "not found")), ("token may not read", api.ApiError(403, "forbidden")), ("error", api.ApiError(500, "boom")),
+                      ("network", api.NetworkError("reset")), ("odd shape", ["not", "a", "dict"]), ("no list", {"ok": True})):
+    w = FakeWorker(subjects=answer)
+    checks, rc, out = scenario("subjects " + label, w)
+    check("subjects (%s): no line at all and exit 0" % label, not any(c.name == "subjects" for c in checks) and "subjects" not in out and rc == 0)
+w = FakeWorker(health=api.NetworkError("timed out"), subjects={"ok": True, "subjects": []})
+checks, rc, out = scenario("subjects skipped when unreachable", w)
+check("subjects: not asked when the Worker is unreachable", not any(c.name == "subjects" for c in checks) and not any(c[1] == "/subjects" for c in w.calls))
 
 # a one-letter token is too short to scrub: the fix text must come out intact
 fresh(True)

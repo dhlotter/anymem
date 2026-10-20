@@ -59,7 +59,7 @@ ENTRY = {"id": ID, "name": "tabs-over-spaces", "description": "d", "status": "ac
 LISTING = {"ok": True, "entries": [ENTRY, {**ENTRY, "id": ID2, "name": "other"}], "next_cursor": None}
 
 # every job has its script, and the retired files are gone
-JOBS = "recall remember get list append update status forget restore undo history link unlink links profile person usage backup devices doctor setup connect init install uninstall".split()
+JOBS = "recall remember get list append update status forget restore undo history link unlink links subject profile person usage backup devices doctor setup connect init install uninstall".split()
 check("one script per job", all((SCRIPTS / f"{j}.py").exists() for j in JOBS))
 check("the retired commands and files are gone", not any((ROOT / p).exists() for p in ("bin/anymem", "bin/mcp-headers", "bin/anymem-backup", "client/hm/commands/promote.py", "client/hm/commands/reject.py",
       "client/hm/commands/review.py", "client/hm/commands/_conflicts.py", "client/hm/commands/tidy.py")) and not (SCRIPTS / "promote.py").exists())
@@ -81,6 +81,25 @@ rc, out, err = run("recall", "q", "--all", env={"ANYMEM_PROJECT": "demo"})
 check("--all drops the scope", "scope" not in query(last()[1]))
 rc, out, err = run("recall", "q", "--json")
 check("--json prints the reply", json.loads(out)["results"][0]["id"] == ID)
+# recall with subjects: a card prints above the memories, the rest of the output is what it was
+PLAIN_REPLY = srv.replies["GET /recall"]
+rc, plain, err = run("recall", "what indent do I use")
+PIP_CARD = {"id": "c1", "slug": "pip", "name": "Pip", "kind": "pet", "brief": "Pip is a beagle.\nHe is afraid of thunder.", "via": [ID], "fields": {}}
+srv.replies["GET /recall"] = (200, {**PLAIN_REPLY[1], "subjects": [PIP_CARD]})
+rc, out, err = run("recall", "what indent do I use")
+check("recall prints a card above the memories as one <memory> line", rc == 0 and out.startswith("- <memory>[card] Pip (pet): Pip is a beagle. He is afraid of thunder.</memory>\n1. "))
+check("a reply without subjects prints exactly the memories, as it always did", plain == f"1. {ID}  tabs-over-spaces\n   the indent rule\n   --- name: x --- Use tabs everywhere.\n2. {ID2}  weak-one  (project demo)  (weak match)\n   body\n")
+check("what follows the card is exactly what a reply without subjects prints", out.split("</memory>\n", 1)[1] == plain and plain.startswith("1. "))
+srv.replies["GET /recall"] = (200, {**PLAIN_REPLY[1], "subjects": [{**PIP_CARD, "via": [ID2]}]})
+rc, out, err = run("recall", "what indent do I use")
+check("a card reached only through a weak match is not printed", "[card]" not in out and "(weak match)" in out)
+srv.replies["GET /recall"] = (200, {"ok": True, "results": [], "subjects": [PIP_CARD]})
+rc, out, err = run("recall", "nothing")
+check("no results, no card", out.strip() == "no memories found")
+srv.replies["GET /recall"] = (200, {**PLAIN_REPLY[1], "subjects": [PIP_CARD]})
+rc, out, err = run("recall", "q", "--json")
+check("--json still prints the reply as it came, subjects included", json.loads(out)["subjects"][0]["slug"] == "pip")
+srv.replies["GET /recall"] = PLAIN_REPLY
 
 # remember
 srv.replies["POST /capture"] = (200, {"ok": True, "id": ID, "status": "active", "tags": []})
@@ -204,6 +223,99 @@ srv.replies["POST /unlink"] = (403, {"ok": False, "error": "Only the admin token
 rc, out, err = run("unlink", ID3, ID, "decided")
 check("a refused unlink is one plain line and exit 1", rc == 1 and "admin token" in err and "Traceback" not in err)
 srv.replies.pop("POST /unlink")
+
+# subjects: the fake Worker keeps them, so the script is checked against its own writes
+rc, out, err = run("subject", "list")
+check("subject list says so when there are none", rc == 0 and out.strip() == "no subjects" and last()[:2] == ("GET", "/subjects"))
+rc, out, err = run("subject", "add", "pet", "pip", "Pip", "--brief", "Pip is a beagle. He is afraid of thunder.")
+PIP_ID = out.split()[-1]
+check("subject add posts slug, kind, name and brief, and prints the slug and the card id", rc == 0 and last()[1] == "/subject"
+      and last()[2] == {"slug": "pip", "kind": "pet", "name": "Pip", "brief": "Pip is a beagle. He is afraid of thunder."} and out.split() == ["added", "pip", PIP_ID] and PIP_ID.startswith("card-"))
+rc, out, err = run("subject", "add", "asset", "the-corolla", "The Corolla", stdin="")
+check("subject add without a brief sends none", rc == 0 and last()[2] == {"slug": "the-corolla", "kind": "asset", "name": "The Corolla"})
+rc, out, err = run("subject", "add", "project", "alpha", "Project Alpha", "--brief-file", "-", stdin="Alpha ships on Fridays.\n")
+check("--brief-file with a lone dash reads the brief from standard input", rc == 0 and last()[2]["brief"] == "Alpha ships on Fridays.")
+brief_file = Path(tempfile.mkdtemp()) / "brief.txt"
+brief_file.write_text("Beta is the second project.\n", encoding="utf-8")
+rc, out, err = run("subject", "add", "project", "beta", "Project Beta", "--brief-file", str(brief_file))
+check("--brief-file PATH reads the brief from the file", rc == 0 and last()[2]["brief"] == "Beta is the second project.")
+rc, out, err = run("subject", "add", "pet", "pip", "Pip again")
+check("a slug that exists is the Worker's refusal as one plain line, exit 1", rc == 1 and "A subject with that slug exists" in err and "Traceback" not in err)
+for bad, why in (("Pip", "uppercase"), ("p", "one character"), ("pip--dog", "double dash"), ("pip-", "trailing dash"), ("p" * 41, "41 characters"), ("pip_dog", "underscore")):
+    rc, out, err = run("subject", "add", "pet", bad, "Pip")
+    check(f"a slug with {why} is refused before sending, exit 2", rc == 2 and srv.requests == [] and "slug" in err)
+rc, out, err = run("subject", "add", "dog", "rex", "Rex")
+check("a kind outside the list is refused before sending, exit 2", rc == 2 and srv.requests == [] and "person" in err)
+rc, out, err = run("subject", "add", "pet", "rex", "R" * 81)
+check("a name over 80 characters is refused before sending", rc == 2 and srv.requests == [] and "80" in err)
+rc, out, err = run("subject", "add", "pet", "rex", "Rex", "--brief", "the key is sk-" + "a1b2c3d4" * 4)
+check("a brief that holds a secret is refused before anything is sent", rc == 2 and srv.requests == [] and "secret" in err)
+rc, out, err = run("subject", "add", "pet", "rex", "Rex", "--brief", "Rex <private>hidden part</private> is a lab.")
+check("private text is removed from the brief before sending", rc == 0 and "hidden part" not in last()[2]["brief"] and "is a lab." in last()[2]["brief"])
+rc, out, err = run("subject", "add", "pet", "mia", "Mia", "--brief", "a", "--brief-file", "x")
+check("--brief and --brief-file together are refused", rc == 2 and srv.requests == [])
+
+rc, out, err = run("subject", "set", "pip", "breed", "beagle")
+check("subject set sends the field to /subject/update by slug", rc == 0 and last()[1] == "/subject/update" and last()[2] == {"slug": "pip", "fields": {"breed": "beagle"}} and out.strip() == "set breed")
+rc, out, err = run("subject", "set", "pip", "breed", "")
+check("an empty value removes the field, sent as null", rc == 0 and last()[2] == {"slug": "pip", "fields": {"breed": None}} and out.strip() == "removed breed")
+rc, out, err = run("subject", "set", "pip", "vet", "Dr Dana Hart")
+rc, out, err = run("subject", "set", "pip", "colour", "brown")
+check("a field the kind does not allow is the Worker's refusal, one plain line, exit 1", rc == 1 and "not a field of a pet" in err and "Traceback" not in err)
+rc, out, err = run("subject", "set", "nobody", "breed", "x")
+check("a slug with no subject is a plain error, exit 1", rc == 1 and "No subject" in err)
+rc, out, err = run("subject", "set", "pip", "vet", "the key is sk-" + "a1b2c3d4" * 4)
+check("a field value that holds a secret is refused before anything is sent", rc == 2 and srv.requests == [] and "secret" in err)
+
+rc, out, err = run("subject", "alias", "pip", "Pippin")
+check("subject alias reads the aliases, then sends the old ones and the new one, lowercase", rc == 0 and [r[1].split("?")[0] for r in srv.requests] == ["/subject", "/subject/update"]
+      and query(srv.requests[0][1])["slug"] == ["pip"] and last()[2] == {"slug": "pip", "aliases": ["pippin"]} and out.strip() == "added alias pippin")
+rc, out, err = run("subject", "alias", "pip", "the   Good Dog")
+check("a second alias keeps the first and squeezes spaces", last()[2]["aliases"] == ["pippin", "the good dog"])
+rc, out, err = run("subject", "alias", "pip", "PIPPIN")
+check("an alias it already has is said and nothing is sent", rc == 0 and "already an alias" in out and [r[0] for r in srv.requests] == ["GET"])
+
+rc, out, err = run("subject", "scope", "pip", "private")
+check("subject scope sends the scope", rc == 0 and last()[2] == {"slug": "pip", "scope": "private"} and out.strip() == "pip is now private")
+rc, out, err = run("subject", "scope", "pip", "secret")
+check("a scope that is not shared or private is refused before sending", rc == 2 and srv.requests == [])
+srv.replies["POST /subject/update"] = (403, {"ok": False, "error": "Only the admin token or a browser login may change a scope.", "code": "admin_only"})
+rc, out, err = run("subject", "scope", "pip", "shared")
+check("a device token's refusal is one plain line, exit 1", rc == 1 and "admin token" in err and "Traceback" not in err)
+srv.replies.pop("POST /subject/update")
+
+srv.links.append({"source_id": ID, "target_id": PIP_ID, "type": "about", "made_by": "user", "confidence": None, "created_at": 90})
+srv.links.append({"source_id": ID2, "target_id": PIP_ID, "type": "related", "made_by": "user", "confidence": None, "created_at": 91})
+srv.names[ID] = "pip-vet-visit"
+rc, out, err = run("subject", "show", "pip")
+lines_out = out.splitlines()
+check("subject show reads GET /subject by slug", last()[0] == "GET" and query(last()[1])["slug"] == ["pip"])
+check("show prints the slug, kind, status, scope and name on the first line, then the id", lines_out[0].split("  ") == ["pip", "pet", "active", "private", "Pip"] and lines_out[1] == "id: " + PIP_ID)
+check("show prints the aliases and each field on its own line", "aliases: pippin, the good dog" in lines_out and "vet: Dr Dana Hart" in lines_out and not any(l.startswith("breed:") for l in lines_out))
+check("show prints the brief, then only the memories about the card, id and name", lines_out[lines_out.index("brief:") + 1] == "Pip is a beagle. He is afraid of thunder." and "members (1):" in lines_out
+      and lines_out[-1] == f"{ID}  pip-vet-visit")
+rc, out, err = run("subject", "show", "nobody")
+check("show of a slug with no subject is a plain error, exit 1", rc == 1 and "No such subject" in err)
+
+rc, out, err = run("subject", "list")
+rows = [r.split("  ") for r in out.splitlines()]
+check("subject list prints slug, kind, status, scope, members and name, one subject per line", rc == 0 and ["pip", "pet", "active", "private", "1 members", "Pip"] in rows and ["the-corolla", "asset", "active", "shared", "0 members", "The Corolla"] in rows)
+rc, out, err = run("subject", "list", "--kind", "asset")
+check("list --kind filters on the Worker", query(last()[1])["kind"] == ["asset"] and [r.split("  ")[0] for r in out.splitlines()] == ["the-corolla"])
+rc, out, err = run("subject", "list", "--kind", "dog")
+check("list refuses a kind outside the list", rc == 2 and srv.requests == [])
+rc, out, err = run("subject", "retire", "the-corolla")
+check("subject retire sets the status retired", rc == 0 and last()[2] == {"slug": "the-corolla", "status": "retired"} and out.strip() == "retired the-corolla")
+rc, out, err = run("subject", "list", "--kind", "asset")
+check("a retired subject is still listed, as retired", "the-corolla  asset  retired" in out)
+rc, out, err = run("subject", "add", "pet", "evil", "Evil\x1b[31m")
+rc, out, err = run("subject", "list")
+check("store text never passes a control character to the terminal", "\x1b" not in out)
+srv.devices.extend([{"id": "dev-1", "label": "laptop", "created_at": 1, "last_used_at": None, "allow_private": True}])
+rc, out, err = run("devices", "allow-private", "dev-1", "off")
+check("devices allow-private posts the flag and the fake Worker keeps it", rc == 0 and last()[1] == "/devices/private" and last()[2] == {"id": "dev-1", "allow_private": False} and srv.devices[0]["allow_private"] is False)
+rc, out, err = run("devices", "list")
+check("devices list shows the flag from a real reply", "private subjects off" in out)
 
 rc, out, err = run("update", ID, "--tag", "a", "--tag", "b")
 check("update with only --tag sends only tags", last()[2] == {"id": ID, "tags": ["a", "b"]})
