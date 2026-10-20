@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.0.4] 2026-10-20
+
+The nightly job's limits are settings now. They were fixed at the Free plan's 40 subrequests and 20 seconds a step, so on a Paid store the backup took 17 of the 40 and the reindex got a handful of memories a night while the merge step got none. `NIGHTLY_SUBREQUESTS` and `NIGHTLY_WALL_MS` set them, the defaults are unchanged, and `setup.py` sets 400 and 120 seconds when the plan is Paid. A store that already runs needs the two settings added to the Worker, or a rerun of `setup.py --plan paid`.
+
 ## [Unreleased]
 
 Preparation for a public repository. The benchmark sets that came from a private store are now small placeholder seeds with made up names, and the real ones live in gitignored `bench/sets/NAME.local.json` files, which a default run reads first. A default benchmark run skips any set that is still a seed. Real ticket ids, a person's name and an employer's ticket prefix are gone from the examples in docs and tests, and the shipped files check now fails on the owner's surname outside the license and on the names that used to sit in tests.

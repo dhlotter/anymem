@@ -2,7 +2,7 @@
 
 The Cloudflare Worker behind anymem. Plain JavaScript ES modules. No dependencies, no bundler, no build step. The code that runs is the code you read. Types are written as JSDoc comments.
 
-Version 2.0.3 (`version.js` and `package.json` agree). It holds auth, the audit trail, device tokens, health and stats, storage and history of memories, search, the write pipeline, extract, the capsule, the dashboard, the nightly job, backups and import. [ARCHITECTURE.md](ARCHITECTURE.md) says how each part works. The people who use anymem never run anything in this folder. `setup.py` uploads these files, see [docs/install.md](../docs/install.md).
+Version 2.0.4 (`version.js` and `package.json` agree). It holds auth, the audit trail, device tokens, health and stats, storage and history of memories, search, the write pipeline, extract, the capsule, the dashboard, the nightly job, backups and import. [ARCHITECTURE.md](ARCHITECTURE.md) says how each part works. The people who use anymem never run anything in this folder. `setup.py` uploads these files, see [docs/install.md](../docs/install.md).
 
 ## Test
 
@@ -56,6 +56,8 @@ For development, a Wrangler deploy works too.
 | `RECALL_MIN_SIM` | var | Cosine at or above which a hit is relevant. A number from 0 to 1, default 0.75 |
 | `RERANK_MIN` | var | Reranker score at or above which a hit is relevant. A number from 0 to 1, default 0.2 |
 | `RERANK` | var | `0` turns the reranker off |
+| `NIGHTLY_SUBREQUESTS` | var | Subrequests the whole nightly run may use. A whole number from 10 to 5000, default 40 (the Free plan). `setup.py` sets 400 when the plan is Paid |
+| `NIGHTLY_WALL_MS` | var | Milliseconds each nightly step may take. A whole number from 1000 to 600000, default 20000. `setup.py` sets 120000 when the plan is Paid |
 | `SMALL_MODEL` | var | The Workers AI model for the small JSON mode jobs (extract, contradiction checks, kind, sensitivity). Default `@cf/meta/llama-3.1-8b-instruct-fast` |
 
 `ALLOWED_HOSTS` is a second layer for a Worker behind a custom domain. If a workers.dev address is ever turned back on, the Worker still refuses it. `setup.py` copies it from the `vars` block of the committed `wrangler.jsonc` on every run, so put it there (or in `wrangler.local.jsonc` for a Wrangler deploy). A value that exists only on the Worker, set by hand, is not read back by `setup.py` and a rerun drops it.
@@ -98,7 +100,7 @@ Errors are always `{"error": "...", "code": "..."}`. Callers may send `X-Anymem-
 
 ## The nightly job
 
-One cron trigger, `0 1 * * *`, runs these steps in order. The steps share one budget of 40 subrequests for the run, each has 20 seconds, and a step that stops early continues the next night.
+One cron trigger, `0 1 * * *`, runs these steps in order. The steps share one budget of 40 subrequests for the run (`NIGHTLY_SUBREQUESTS`), each has 20 seconds (`NIGHTLY_WALL_MS`), and a step that stops early continues the next night.
 
 1. `backup` writes `backups/anymem-YYYY-MM-DD.json.gz` to R2, and refuses one with fewer than 80 percent of the newest backup's entries.
 2. `purge_trash` deletes memories trashed more than 14 days ago.

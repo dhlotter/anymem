@@ -74,9 +74,16 @@ def upload_assets(client: cf.Client, script: str, assets: dict, say) -> str:
     return token
 
 
-def vars_for(config: dict, access: "dict | None") -> dict:
-    """Plain settings. Access values are never taken from the committed file, they come from the Access step or are left out."""
+PAID_NIGHTLY = {"NIGHTLY_SUBREQUESTS": "400", "NIGHTLY_WALL_MS": "120000"}  # Free stays at the Worker's own defaults of 40 and 20 seconds
+
+
+def vars_for(config: dict, access: "dict | None", plan: str = "") -> dict:
+    """Plain settings. Access values are never taken from the committed file, they come from the Access step or are left out.
+    A store on the Paid plan gets a bigger nightly budget, unless the config file sets one."""
     out = {k: v for k, v in (config.get("vars") or {}).items() if not k.startswith("ACCESS_")}
+    if plan == "paid":
+        for key, value in PAID_NIGHTLY.items():
+            out.setdefault(key, value)
     out["REQUIRE_ACCESS"] = "true" if access else "false"
     if access:
         out.update(ACCESS_TEAM_DOMAIN=access["team_domain"], ACCESS_AUD=access["aud"], ACCESS_SERVICE_COMMON_NAMES=access["common_name"],
