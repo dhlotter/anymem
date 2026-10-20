@@ -8,6 +8,7 @@ h1 { font: 700 var(--text-xl)/1.1 var(--font-display); letter-spacing: 0.005em; 
 .plain { list-style: none; }
 .plain li { display: flex; flex-direction: column; gap: var(--space-2xs); padding: var(--space-xs) 0; border-top: 1px solid var(--color-rule); }
 .plain li:first-child { border-top: 0; }
+.links li { flex-direction: row; align-items: baseline; justify-content: space-between; gap: var(--space-sm); }
 .panel { margin-top: var(--space-xl); padding-top: var(--space-md); border-top: 1px solid var(--color-rule); min-width: 0; }
 .panel__head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-sm); }
 .panel__tools { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-xs); }

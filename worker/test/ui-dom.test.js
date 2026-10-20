@@ -129,6 +129,7 @@ function memoryWorld(answers = {}) {
   w.answers["/entry"] = () => ({ ok: true, entry: entry() });
   w.answers["/history"] = () => ({ ok: true, versions: [] });
   w.answers["/ui/api/memory-extras"] = () => extras();
+  w.answers["/links"] = () => ({ ok: true, id: "m1", links: [] });
   w.answers["/list"] = () => ({ entries: [], next_cursor: null });
   w.answers["/ui/api/sources"] = () => ({ ok: true, sources: { total: 0, rows: [] } });
   Object.assign(w.answers, answers);
@@ -201,6 +202,86 @@ test("the drawer shows only the failure of the memory that is open", async () =>
   const msg = w.root.querySelector(".mem__panel [data-msg]");
   assert.equal(msg.textContent, "", "the failure of the memory before is not shown on the one open now");
   assert.match(w.root.querySelector(".mem__panel").textContent, /second-note/);
+});
+
+const linkRow = (over = {}) => ({ type: "about", direction: "out", other_id: "m2", other_name: "pip-vet", made_by: "user", confidence: null, created_at: NOW - DAY, ...over });
+
+test("the drawer lists the links from GET /links, grouped by type with the other memory named", async () => {
+  const w = memoryWorld({ "/links": () => ({ ok: true, id: "m1", links: [linkRow(), linkRow({ type: "part_of", direction: "in", other_id: "m3", other_name: "alpha-plan", made_by: "system", confidence: 0.7 })] }) });
+  memoriesMount(w.root, w.ctx, "m1", {});
+  await flush();
+  assert.ok(w.calls.some((c) => c.path === "/links?id=m1" && c.method === "GET"));
+  const text = w.root.querySelector(".mem__panel").textContent;
+  assert.match(text, /Links to pip-vet/);
+  assert.match(text, /Linked from alpha-plan/);
+  assert.match(text, /70% sure/);
+  assert.equal(w.root.querySelectorAll('[data-action="unlink"]').length, 2);
+});
+
+test("Not this on a system link posts /unlink with the right ends, then reloads the links", async () => {
+  let links = [linkRow({ type: "part_of", direction: "in", other_id: "m3", other_name: "alpha-plan", made_by: "system", confidence: 0.7 })];
+  const w = memoryWorld({ "/links": () => ({ ok: true, id: "m1", links }), "/unlink": () => ((links = []), { ok: true, removed: true }) });
+  memoriesMount(w.root, w.ctx, "m1", {});
+  await flush();
+  w.root.querySelector('[data-action="unlink"]').click();
+  await flush();
+  const call = w.calls.find((c) => c.path === "/unlink");
+  assert.equal(call.method, "POST");
+  assert.deepEqual(call.body, { source_id: "m3", target_id: "m1", type: "part_of" }, "an incoming link has the other memory as its source");
+  const panel = w.root.querySelector(".mem__panel");
+  assert.match(panel.textContent, /No links yet/);
+  assert.match(panel.textContent, /will not make that link again/);
+  assert.equal(w.doc.querySelector("#toasts").childElementCount, 0, "there is no undo for a refusal");
+});
+
+test("Remove on a user link posts /unlink and the toast Undo puts the link back", async () => {
+  let links = [linkRow()];
+  const w = memoryWorld({ "/links": () => ({ ok: true, id: "m1", links }), "/unlink": () => ((links = []), { ok: true, removed: true }), "/link": () => ({ ok: true, created: true }) });
+  memoriesMount(w.root, w.ctx, "m1", {});
+  await flush();
+  w.root.querySelector('[data-action="unlink"]').click();
+  await flush();
+  assert.deepEqual(w.calls.find((c) => c.path === "/unlink").body, { source_id: "m1", target_id: "m2", type: "about" });
+  const undo = w.doc.querySelector("#toasts button");
+  assert.ok(undo, "the toast offers Undo");
+  undo.click();
+  await flush();
+  assert.deepEqual(w.calls.find((c) => c.path === "/link").body, { source_id: "m1", target_id: "m2", type: "about" });
+});
+
+test("removing a link of an older free text type sends its stored type and offers no undo", async () => {
+  const w = memoryWorld({ "/links": () => ({ ok: true, id: "m1", links: [linkRow({ type: "likes-a-lot" })] }), "/unlink": () => ({ ok: true, removed: true }) });
+  memoriesMount(w.root, w.ctx, "m1", {});
+  await flush();
+  assert.match(w.root.querySelector(".mem__panel").textContent, /related/);
+  w.root.querySelector('[data-action="unlink"]').click();
+  await flush();
+  assert.equal(w.calls.find((c) => c.path === "/unlink").body.type, "likes-a-lot");
+  assert.equal(w.doc.querySelector("#toasts").childElementCount, 0, "that type cannot be added again, so there is nothing to undo");
+});
+
+test("a refused unlink shows the reason and leaves the links as they were", async () => {
+  const w = memoryWorld({ "/links": () => ({ ok: true, id: "m1", links: [linkRow()] }), "/unlink": () => Promise.reject(new ApiError(403, "admin_only", "Only the admin can remove that link.")) });
+  memoriesMount(w.root, w.ctx, "m1", {});
+  await flush();
+  w.root.querySelector('[data-action="unlink"]').click();
+  await flush();
+  assert.match(w.root.querySelector(".mem__panel").textContent, /Only the admin can remove that link\./);
+  assert.match(w.root.querySelector(".mem__panel").textContent, /Links to pip-vet/);
+});
+
+test("the Link form sends the chosen type from the closed list", async () => {
+  const w = memoryWorld({ "/link": () => ({ ok: true, created: true }) });
+  memoriesMount(w.root, w.ctx, "m1", {});
+  await flush();
+  w.root.querySelector('[data-form-name="link"]').click();
+  const form = w.root.querySelector('form[data-form="link"]');
+  assert.ok(form.querySelector('select[name="type"]'), "the type is a select");
+  form.querySelector('input[name="target"]').value = "m2";
+  form.querySelector('select[name="type"]').value = "affects";
+  form.dispatchEvent(new Event("submit"));
+  await flush();
+  assert.deepEqual(w.calls.find((c) => c.path === "/link").body, { source_id: "m1", target_id: "m2", type: "affects" });
 });
 
 test("the column picks: an arrow key only moves the choice, Enter or a click applies it, and a change alone applies nothing", async () => {
