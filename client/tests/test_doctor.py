@@ -417,15 +417,32 @@ w = FakeWorker(health=api.NetworkError("timed out"))
 checks, rc, out = scenario("usage skipped when unreachable", w)
 check("usage skipped when unreachable: no /stats call", status(checks, "usage").status == "skip" and not any(c[1] == "/stats" for c in w.calls))
 
-# 19. subjects from GET /subjects: one info line with the counts, and no line at all when the Worker does not answer
+# 19. subjects from GET /subjects: one info line with the counts by status and the automation switch, and no line at all when the Worker does not answer
+STATS_OFF = {"count": 42, "by_status": {"active": 40}, "unvectorized": 0, "unclassified": 0, "last_run": {"job": "nightly", "ok": True, "summary": {}}}
 w = FakeWorker(subjects={"ok": True, "subjects": [{"slug": "pip", "status": "active", "scope": "private"}, {"slug": "corolla", "status": "active", "scope": "shared"},
                                                    {"slug": "old-cat", "status": "retired", "scope": "private"}]})
 checks, rc, out = scenario("subjects", w)
-check("subjects: one info line with the active and the private count, exit 0", status(checks, "subjects").status == "info" and status(checks, "subjects").detail == "2 active, 2 private"
-      and "info  subjects       2 active, 2 private" in out and rc == 0)
+check("subjects: one info line with the counts by status and the private count, exit 0", status(checks, "subjects").status == "info" and status(checks, "subjects").detail == "2 active, 0 proposed, 0 stale, 2 private"
+      and "info  subjects       2 active, 0 proposed, 0 stale, 2 private" in out and rc == 0)
+check("subjects: a Worker that does not report the switch gets no guess about it", "auto" not in status(checks, "subjects").detail)
+w = FakeWorker(subjects={"ok": True, "subjects": [{"slug": "pip", "status": "active", "scope": "shared"}, {"slug": "dana", "status": "proposed", "scope": "shared"}, {"slug": "tabby", "status": "proposed", "scope": "shared"},
+                                                   {"slug": "corolla", "status": "stale", "scope": "shared"}, {"slug": "old-cat", "status": "retired", "scope": "shared"}],
+                        }, stats=dict(STATS_OFF, subjects_on=True, subjects_auto=True))
+checks, rc, out = scenario("subjects auto on", w)
+check("subjects: proposed and stale are counted by name and auto on is said", status(checks, "subjects").detail == "1 active, 2 proposed, 1 stale, 0 private, auto on" and rc == 0)
+w = FakeWorker(subjects={"ok": True, "subjects": []}, stats=dict(STATS_OFF, subjects_on=True, subjects_auto=False))
+checks, rc, out = scenario("subjects auto off", w)
+check("subjects: auto off is said", status(checks, "subjects").detail == "0 active, 0 proposed, 0 stale, 0 private, auto off")
+w = FakeWorker(subjects={"ok": True, "subjects": []}, stats=dict(STATS_OFF, subjects_on=False, subjects_auto=True))
+checks, rc, out = scenario("subjects auto set, subjects off", w)
+check("subjects: auto set while SUBJECTS is off says it does nothing", "auto set but SUBJECTS is off, so it does nothing" in status(checks, "subjects").detail)
+for label, answer in (("stats error", api.ApiError(500, "boom")), ("stats network", api.NetworkError("reset")), ("stats odd shape", ["not", "a", "dict"]), ("flag not a boolean", dict(STATS_OFF, subjects_auto="on"))):
+    w = FakeWorker(subjects={"ok": True, "subjects": []}, stats=answer)
+    checks, rc, out = scenario("subjects " + label, w)
+    check("subjects (%s): the counts still show, with nothing said about auto, exit 0" % label, status(checks, "subjects").detail == "0 active, 0 proposed, 0 stale, 0 private" and rc == 0)
 w = FakeWorker(subjects={"ok": True, "subjects": []})
 checks, rc, out = scenario("subjects none", w)
-check("subjects: a Worker with none says 0 active, 0 private", status(checks, "subjects").detail == "0 active, 0 private")
+check("subjects: a Worker with none says 0 of each", status(checks, "subjects").detail == "0 active, 0 proposed, 0 stale, 0 private")
 for label, answer in (("older Worker", api.ApiError(404, "not found")), ("token may not read", api.ApiError(403, "forbidden")), ("error", api.ApiError(500, "boom")),
                       ("network", api.NetworkError("reset")), ("odd shape", ["not", "a", "dict"]), ("no list", {"ok": True})):
     w = FakeWorker(subjects=answer)

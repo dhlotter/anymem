@@ -28,6 +28,8 @@ export function countFor(name, home) {
     }
     case "people":
       return nav.pending > 0 ? { text: formatNumber(nav.pending), label: `${count(nav.pending, "change")} waiting for you`, alert: true } : null;
+    case "subjects":
+      return nav.subjects_proposed > 0 ? { text: formatNumber(nav.subjects_proposed), label: `${count(nav.subjects_proposed, "subject")} waiting for you`, alert: true } : null;
     case "health":
       return nav.attention > 0 ? { text: formatNumber(nav.attention), label: `${nav.attention === 1 ? "1 check needs" : `${formatNumber(nav.attention)} checks need`} attention`, alert: true } : null;
     default:

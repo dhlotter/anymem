@@ -38,8 +38,11 @@ const SYSTEM_ONLY = ["supersedes", "derived_from"];
 export const ADDABLE_LINK_TYPES = LINK_TYPES.filter((t) => !SYSTEM_ONLY.includes(t));
 const shownType = (type) => (LINK_TYPES.includes(type) ? type : "related"); // an older link with free text shows as related
 
+/** What a link the system made says about itself: "made by the system, confidence 0.80". A link without a confidence says only the first part. */
+export const madeBy = (l) => `made by the system${typeof l.confidence === "number" ? `, confidence ${l.confidence.toFixed(2)}` : ""}`;
+
 /** One link of the open memory. The button keeps the stored type, so a link of an older free text type can still be taken away. Without actions the row only names the other end. */
-const linkRow = (l, actions = true) => html`<li><span>${l.direction === "out" ? "Links to" : "Linked from"} <a href="${memoryLink(l.other_id)}">${l.other_name || l.other_id.slice(0, 8)}</a>${l.made_by === "system" ? html` ${badge("made by anymem", "muted")}${typeof l.confidence === "number" ? html` <span class="muted">${Math.round(l.confidence * 100)}% sure</span>` : ""}` : ""}</span>${actions ? html`<button type="button" class="btn btn--quiet" data-action="unlink" data-other="${l.other_id}" data-direction="${l.direction}" data-type="${l.type}" data-made-by="${l.made_by}">${l.made_by === "system" ? "Not this" : "Remove"}<span class="sr"> link, ${l.other_name || l.other_id.slice(0, 8)}</span></button>` : ""}</li>`;
+const linkRow = (l, actions = true) => html`<li><span>${l.direction === "out" ? "Links to" : "Linked from"} <a href="${memoryLink(l.other_id)}">${l.other_name || l.other_id.slice(0, 8)}</a>${l.made_by === "system" ? html` <span class="muted">${madeBy(l)}</span>` : ""}</span>${actions ? html`<button type="button" class="btn btn--quiet" data-action="unlink" data-other="${l.other_id}" data-direction="${l.direction}" data-type="${l.type}" data-made-by="${l.made_by}">${l.made_by === "system" ? "Not this" : "Remove"}<span class="sr"> link, ${l.other_name || l.other_id.slice(0, 8)}</span></button>` : ""}</li>`;
 
 /** The links of a memory from GET /links, grouped by type. Null leaves the section out, for a Worker that could not list them. A subject card shows them without buttons, they are changed on the memory. */
 export function linksView(links, actions = true) {
