@@ -30,6 +30,15 @@ test("POST /subject makes the card memory and the row, and replies with the subj
   assert.ok((await app.call("/recall?query=small%20brown%20dog")).json.results.some((r) => r.id === subject.id), "searchable");
 });
 
+test("a card made with a harness header keeps it, and a card made without one is labelled Anymem, not Unknown", async () => {
+  const app = await createApp();
+  const named = await post(app, "/subject", { slug: "pip", kind: "pet", name: "Pip", harness: "spoofed" }, { headers: { "x-anymem-harness": "claude-code" } });
+  const blank = await post(app, "/subject", { slug: "rex", kind: "pet", name: "Rex" });
+  const entry = async (res) => (await app.call(`/entry?id=${res.json.subject.id}`)).json.entry;
+  assert.deepEqual([(await entry(named)).harness, (await entry(named)).harness_label], ["claude", "Claude Code"], "from the header, never the body");
+  assert.deepEqual([(await entry(blank)).harness, (await entry(blank)).harness_label], ["", "Anymem"]);
+});
+
 test("a subject needs a good slug, kind, name and fields, and a taken slug is a conflict", async () => {
   const app = await createApp();
   const bad = async (over, code, status = 400) => {

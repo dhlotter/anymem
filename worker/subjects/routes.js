@@ -1,5 +1,7 @@
 // The subject routes. Each handler reads and checks input, calls the subject store, and notes the card memory id for the audit row.
 // A device token may read subjects but not write them (the route table says so), and never sees a private subject it is kept from.
+import { cleanLabel } from "../audit.js";
+import { harnessId } from "../harnesses.js";
 import { badRequest, HttpError, json, notFound, readJson } from "../http.js";
 import { indexMemories } from "../search/indexer.js";
 import { REASONS, screenExplicit } from "../write/screen.js";
@@ -30,7 +32,7 @@ export async function createSubject(c) {
   const { request, env, now, maxBody, memoryIds } = c;
   const body = await readJson(request, maxBody);
   refuseSecret(body);
-  const subject = await createSubjectStore(env.DB, now).create(body);
+  const subject = await createSubjectStore(env.DB, now).create({ ...body, harness: harnessId(cleanLabel(request.headers.get("x-anymem-harness"))) });
   memoryIds.push(subject.id);
   indexLater(c, subject.id);
   return json({ ok: true, subject });

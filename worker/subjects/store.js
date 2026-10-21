@@ -149,7 +149,7 @@ export function createSubjectStore(db, now = Date.now) {
 
     /**
      * Make a subject: the card memory first (origin system), then the row. A slug that is taken is 409 subject_exists.
-     * @param {{slug: string, kind: string, name: string, brief?: string, fields?: unknown, aliases?: unknown, scope?: string}} f
+     * @param {{slug: string, kind: string, name: string, brief?: string, fields?: unknown, aliases?: unknown, scope?: string, harness?: string}} f the harness is the caller's name from the request header, never from the body
      */
     async create(f) {
       const slug = checkSlug(f.slug);
@@ -163,7 +163,7 @@ export function createSubjectStore(db, now = Date.now) {
       const taken = () => conflict(`A subject with the slug ${slug} exists already.`, "subject_exists");
       if (await db.prepare("SELECT 1 AS n FROM subjects WHERE slug = ?").bind(slug).first()) throw taken();
       const parsed = await parseMemory(cardContent({ slug, kind, name, brief }), ["subject", `subject:${slug}`, `subject-kind:${kind}`]);
-      const card = await memories.create({ ...parsed, origin: "system" });
+      const card = await memories.create({ ...parsed, origin: "system", harness: f.harness ?? "" });
       try {
         await db.prepare("INSERT INTO subjects (id, slug, kind, status, scope, fields, aliases, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)").bind(card.id, slug, kind, scope, JSON.stringify(fields), JSON.stringify(aliases), at, at).run();
       } catch (err) {
