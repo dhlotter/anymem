@@ -14,6 +14,7 @@ import { runMaintenance, runMaintenanceRoute } from "./cron/maintenance.js";
 import { createDevice, listDevices, revokeDevice, setDevicePrivate } from "./devices.js";
 import { HttpError, errorResponse, json, notFound } from "./http.js";
 import { append, forget, getEntry, getLinks, history, link, listEntries, restore, setStatus, undo, unlink, update } from "./memory/routes.js";
+import { assignPreview } from "./subjects/assign-routes.js";
 import { createSubject, getSubject, listSubjects, updateSubject } from "./subjects/routes.js";
 import { harnessRoute, importRoute, questionsRoute, reindexRoute } from "./admin/routes.js";
 import { extractRoute } from "./extract/extract.js";
@@ -58,6 +59,7 @@ const ROUTES = [
   { method: "GET", path: "/subjects", browser: true, handler: listSubjects },
   { method: "GET", path: "/subject", browser: true, handler: getSubject },
   { method: "GET", path: "/recall", browser: true, model: true, handler: getRecall },
+  { method: "GET", path: "/admin/subjects/assign-preview", admin: true, handler: assignPreview },
   { method: "POST", path: "/admin/reindex", admin: true, handler: reindexRoute },
   { method: "POST", path: "/admin/questions", admin: true, handler: questionsRoute },
   { method: "POST", path: "/admin/harness", admin: true, handler: harnessRoute },
