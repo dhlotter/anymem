@@ -11,7 +11,7 @@ import { runMaintenance, STEPS } from "../cron/maintenance.js";
 import { dayOf } from "../counters.js";
 
 const UNRELATED = "alpha beta gamma delta epsilon zeta theta iota kappa sigma";
-const STEP_NAMES = ["backup", "purge_trash", "reindex", "classify", "cluster", "briefs", "merge", "probation", "purge_old", "token"];
+const STEP_NAMES = ["clear", "backup", "purge_trash", "reindex", "classify", "cluster", "briefs", "merge", "probation", "purge_old", "token"];
 const only = (app, step, body = {}) => runNightly(app, { steps: [step], ...body }).then((r) => r.summary[step]);
 
 // ------------------------------------------------------------------ the run

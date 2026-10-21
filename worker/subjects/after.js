@@ -73,7 +73,7 @@ export async function afterSubjects(env, { id, content, neighbours = [], hint, a
     if (statements.length) {
       // A memory that now belongs to a private subject loses the links the system made to shared ones, in the same batch (the update in
       // place of a memory a capture linked to a shared subject is the case: it must not keep being visible).
-      if (found.private_ids.length) statements.push(env.DB.prepare(SHED_SHARED_SQL).bind(id, "about", id));
+      for (const privateId of found.private_ids) statements.push(env.DB.prepare(SHED_SHARED_SQL).bind(id, "about", privateId, id));
       const done = await env.DB.batch(statements);
       // A link that was decided but not made lost a race (the card went, a person said no, a private link appeared), so it counts as failed.
       for (let i = 0; i < found.links.length; i++) {

@@ -43,13 +43,13 @@ export async function reindexRoute({ request, env, now, maxBody }) {
  * are imported, an id that already exists is skipped, so a page can be sent twice. The search index is not built here,
  * call /admin/reindex after.
  */
-export async function importRoute({ request, env, now, memoryIds }) {
+export async function importRoute({ request, env, now, memoryIds, ctx }) {
   const body = await readJson(request, MAX_IMPORT_BYTES);
   if (!Array.isArray(body.entries)) throw badRequest("entries must be a list.");
   const offset = body.offset === undefined ? 0 : body.offset;
   if (!Number.isSafeInteger(offset) || offset < 0) throw badRequest("offset must be a whole number of 0 or more.");
   const limit = pageSize(body.limit, DEFAULT_IMPORT_PAGE, MAX_IMPORT_PAGE, "limit");
-  if (body.format === 2) return json(await importV2(env, body, { offset, limit }, memoryIds));
+  if (body.format === 2) return json(await importV2(env, body, { offset, limit }, memoryIds, { now, ctx }));
   const page = body.entries.slice(offset, offset + limit);
   const nextOffset = offset + page.length;
 

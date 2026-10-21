@@ -174,8 +174,9 @@ const byTurn = (a, b) => {
  */
 export async function briefsStep(env, { now, budget }) {
   const out = { candidates: 0, built: 0, stale: 0, failed: 0, conflicts: 0, retired: 0, cleared: 0, pinned: 0, remaining: 0 };
-  // The backup clear comes first and does not depend on a switch: the routes blank a brief the moment its text must go, and this
-  // catches what they could not (a purge, a merge, a request that died). Pinned and retired subjects are cleared too.
+  // The nightly clear step ("clear", the first step of the run) has done this already, so here it is one read that finds nothing. It stays
+  // for a run that picks only this step, and for a card that lost its brief's right to stay during the run. It does not depend on a switch:
+  // the routes blank a brief the moment its text must go, and this catches what they could not. Pinned and retired subjects are cleared too.
   let cleared = 0;
   if (budget.has(1)) {
     try {

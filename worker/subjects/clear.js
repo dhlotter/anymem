@@ -84,15 +84,17 @@ async function blank(env, { now, store }, card, why, ids) {
 
 /**
  * Blank these cards, then bring their search keys and vectors up to date. With ctx the indexing runs after the reply, without it
- * (the nightly step) it is waited for. A card that cannot be blanked is logged and the others still are.
+ * (the nightly step) it is waited for. A card that cannot be blanked is logged and the others still are. With strict the error is
+ * thrown at the end (after the others were tried), for a request that must fail rather than leave text readable that should be gone.
  * @param {{DB: any}} env
  * @param {{id: string, slug: string, description: string, content: string, qvec?: string}[]} cards
- * @param {{now: () => number, ctx?: {waitUntil: (p: Promise<any>) => void}, why: string, ids?: string[], room?: () => boolean}} f room says whether there is budget for one more card
+ * @param {{now: () => number, ctx?: {waitUntil: (p: Promise<any>) => void}, why: string, ids?: string[], room?: () => boolean, strict?: boolean}} f room says whether there is budget for one more card
  * @returns {Promise<string[]>} the ids of the cards that were blanked
  */
-async function clearCards(env, cards, { now, ctx, why, ids = [], room = () => true }) {
+async function clearCards(env, cards, { now, ctx, why, ids = [], room = () => true, strict = false }) {
   const store = createStore(env.DB, now);
   const done = [];
+  let failure = null;
   for (const card of cards) {
     if (!room()) break;
     try {
@@ -103,6 +105,7 @@ async function clearCards(env, cards, { now, ctx, why, ids = [], room = () => tr
       if (vectors.length) await env.VECTORIZE.deleteByIds(vectors).catch(() => console.error("vector delete failed"));
     } catch (err) {
       console.error("brief clear failed", err?.name);
+      failure ??= err;
     }
   }
   if (done.length) {
@@ -110,28 +113,51 @@ async function clearCards(env, cards, { now, ctx, why, ids = [], room = () => tr
     if (ctx) ctx.waitUntil(index);
     else await index;
   }
+  if (strict && failure) throw failure;
   return done;
 }
 
-/**
- * Blank every card that cites one of these memories. Call it after a memory is forgotten, replaced, or linked to a private subject.
- * With sharedOnly, a private subject's card is left alone, because a private card may hold text from a private subject's members.
- * Costs one read when no card cites them.
- * @param {{DB: any}} env
- * @param {{ids: string[], now: () => number, ctx?: {waitUntil: (p: Promise<any>) => void}, sharedOnly?: boolean, why?: string, room?: () => boolean}} f
- * @returns {Promise<string[]>} the ids of the cards that were blanked
- */
-export async function clearCiting(env, { ids, now, ctx, sharedOnly = false, why = "member.gone", room }) {
-  const list = [...new Set(ids)].filter((id) => typeof id === "string" && id);
-  if (!list.length) return [];
-  const { results } = await env.DB
+// The cards that cite these memories (ids is a JSON list). With a target, only when that subject is private.
+const citingStatement = (db, ids, { sharedOnly, target }) =>
+  db
     .prepare(
       `SELECT DISTINCT s.id, s.slug, c.description, c.content, ${QUESTION_VECTORS("s.id")} AS qvec FROM links l JOIN subjects s ON s.id = l.source_id JOIN memories c ON c.id = s.id
-       WHERE l.link_type = 'derived_from' AND l.target_id IN (SELECT value FROM json_each(?))${sharedOnly ? " AND s.scope <> 'private'" : ""} ORDER BY s.id`,
+       WHERE l.link_type = 'derived_from' AND l.target_id IN (SELECT value FROM json_each(?))${sharedOnly ? " AND s.scope <> 'private'" : ""}${target ? " AND EXISTS (SELECT 1 FROM subjects WHERE id = ? AND scope = 'private')" : ""} ORDER BY s.id`,
     )
-    .bind(JSON.stringify(list))
-    .all();
-  return clearCards(env, results, { now, ctx, why, ids: list.slice(0, 5), room });
+    .bind(ids, ...(target ? [target] : []));
+
+/**
+ * Blank every card that cites one of these memories. Call it before a memory is forgotten or replaced, and after it is linked to a
+ * private subject. With sharedOnly, a private subject's card is left alone, because a private card may hold text from a private
+ * subject's members. Costs one read when no card cites them. With strict a card that cannot be blanked throws, so the request fails.
+ * @param {{DB: any}} env
+ * @param {{ids: string[], now: () => number, ctx?: {waitUntil: (p: Promise<any>) => void}, sharedOnly?: boolean, why?: string, room?: () => boolean, strict?: boolean}} f
+ * @returns {Promise<string[]>} the ids of the cards that were blanked
+ */
+export async function clearCiting(env, { ids, now, ctx, sharedOnly = false, why = "member.gone", room, strict = false }) {
+  const list = [...new Set(ids)].filter((id) => typeof id === "string" && id);
+  if (!list.length) return [];
+  const { results } = await citingStatement(env.DB, JSON.stringify(list), { sharedOnly }).all();
+  return clearCards(env, results, { now, ctx, why, ids: list.slice(0, 5), room, strict });
+}
+
+/**
+ * The step before a link from a memory to a subject is stored. One read tells whether the target is private and, in the same call,
+ * which shared cards cite the memory. When it is private those cards are blanked now, before the link exists, so there is no moment
+ * at which the memory belongs to a private subject and a shared card still holds its text. A card that cannot be blanked throws,
+ * and the caller then does not store the link. Costs one call, the same as asking about the scope alone.
+ * @param {{DB: any}} env
+ * @param {{source: string, target: string, now: () => number, ctx?: {waitUntil: (p: Promise<any>) => void}}} f
+ * @returns {Promise<boolean>} true when the target is a private subject
+ */
+export async function clearBeforeLink(env, { source, target, now, ctx }) {
+  const [scope, citing] = await env.DB.batch([
+    env.DB.prepare("SELECT 1 AS n FROM subjects WHERE id = ? AND scope = 'private'").bind(target),
+    citingStatement(env.DB, JSON.stringify([source]), { sharedOnly: true, target }),
+  ]);
+  const isPrivate = scope.results.length > 0;
+  if (isPrivate) await clearCards(env, citing.results, { now, ctx, why: "member.private", ids: [source], strict: true });
+  return isPrivate;
 }
 
 /**
@@ -140,19 +166,20 @@ export async function clearCiting(env, { ids, now, ctx, sharedOnly = false, why 
  * subject, or edited, does not count. Used by the nightly step as a backup.
  * @param {{DB: any}} env
  * With only, just that subject's card is looked at (a private subject that has become shared is the case).
- * @param {{now: () => number, room?: () => boolean, only?: string, ctx?: {waitUntil: (p: Promise<any>) => void}}} f
+ * With limit, at most that many cards (MAX_CLEARS when it is not given).
+ * @param {{now: () => number, room?: () => boolean, only?: string, ctx?: {waitUntil: (p: Promise<any>) => void}, limit?: number, strict?: boolean}} f
  * @returns {Promise<string[]>} the ids of the cards that were blanked
  */
-export async function clearIneligible(env, { now, room, only, ctx }) {
+export async function clearIneligible(env, { now, room, only, ctx, limit = MAX_CLEARS, strict = false }) {
   const { results } = await env.DB
     .prepare(
       `SELECT s.id, s.slug, c.description, c.content, ${QUESTION_VECTORS("s.id")} AS qvec FROM subjects s JOIN memories c ON c.id = s.id
        WHERE ${only ? "s.id = ? AND " : ""}EXISTS (SELECT 1 FROM links l LEFT JOIN memories m ON m.id = l.target_id
                      WHERE l.source_id = s.id AND l.link_type = 'derived_from'
                        AND (m.id IS NULL OR m.deleted_at IS NOT NULL OR m.valid_until IS NOT NULL OR (s.scope <> 'private' AND ${IN_PRIVATE("m.id")})))
-       ORDER BY s.id LIMIT ${MAX_CLEARS}`,
+       ORDER BY s.id LIMIT ?`,
     )
-    .bind(...(only ? [only] : []))
+    .bind(...(only ? [only] : []), limit)
     .all();
-  return clearCards(env, results, { now, ctx, why: "member.gone", room });
+  return clearCards(env, results, { now, ctx, why: "member.gone", room, strict });
 }
