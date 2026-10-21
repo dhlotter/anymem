@@ -64,6 +64,8 @@ const STALE_WORDS = {
   uncited_number: "a line had a number or a date that no cited memory says",
   instruction: "a line read like an instruction",
   bad_card: "the card could not hold a brief",
+  unbacked_claim: "a line said something its cited memories do not back up",
+  members_changed: "its memories changed, so the old brief was cleared until it is rebuilt",
 };
 
 /** Why a brief is stale, in plain words. A reason the dashboard does not know is shown as it is, with the dots and underscores made spaces. */
