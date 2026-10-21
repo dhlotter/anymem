@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.0.8] 2026-10-21
+
+Subject cards no longer show Unknown in the Tool column.
+
+1. **Card harness.** A card made through `POST /subject` keeps the caller's `x-anymem-harness` name, like every other save. A memory with origin system and no harness is labelled Anymem instead of Unknown, which covers cards made by a script and the three already stored.
+
 ## [2.0.7] 2026-10-20
 
 People fold into Subjects. A person is a subject of kind person, so the People screen no longer lists them.

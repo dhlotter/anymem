@@ -31,6 +31,7 @@ export function harnessLabel(harness, origin = "") {
   const known = knownHarness(harness);
   if (known) return known.label;
   if (harness) return String(harness);
+  if (origin === "system") return "Anymem";
   return origin === "import" ? "Imported" : "Unknown";
 }
 
