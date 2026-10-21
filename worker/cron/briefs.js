@@ -19,6 +19,8 @@ export const MAX_BUILDS = 8;
 export const MAX_RETIRES = 8;
 export const RETIRE_BELOW = 3;
 export const RETIRE_AFTER_MS = 60 * 24 * 60 * 60 * 1000;
+// A person, a pet or an asset has few memories by nature, so only a project, an area or a topic can fade away by itself.
+const RETIRABLE_KINDS = new Set(["project", "area", "topic"]);
 // What one build costs at most: the model, the fresh read of the members, and the card update with the links, the subject row and
 // the audit row (two D1 calls, the read of the card and one batch). A failed build costs less.
 const BUILD_COST = 4;
@@ -174,7 +176,7 @@ export async function briefsStep(env, { now, budget }) {
       out.pinned++;
       continue;
     }
-    if ((live.get(row.id) ?? 0) < RETIRE_BELOW && now() - row.created_at > RETIRE_AFTER_MS) {
+    if (RETIRABLE_KINDS.has(row.kind) && (live.get(row.id) ?? 0) < RETIRE_BELOW && now() - row.created_at > RETIRE_AFTER_MS) {
       if (out.retired < MAX_RETIRES && budget.has(RETIRE_COST + BUILD_COST)) {
         const started = now();
         await env.DB.batch([

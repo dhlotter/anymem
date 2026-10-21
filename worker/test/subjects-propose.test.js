@@ -335,6 +335,14 @@ test("dismiss retires the subject, trashes nothing and keeps the slug taken", as
   assert.ok(memory);
 });
 
+test("bringing a dismissed proposal back makes its card active, so recall can offer it again", async () => {
+  const { app, subject } = await proposed();
+  assert.equal((await post(app, "/subject/dismiss", { slug: "pip" })).status, 200);
+  assert.equal((await cardOf(app, subject.id)).status, "pending");
+  assert.equal((await post(app, "/subject/update", { slug: "pip", status: "active" })).status, 200);
+  assert.equal((await cardOf(app, subject.id)).status, "active");
+});
+
 test("only a proposed subject can be accepted or dismissed", async () => {
   const { app } = await proposed();
   assert.equal((await post(app, "/subject", { slug: "rex", kind: "pet", name: "Rex" })).status, 200);

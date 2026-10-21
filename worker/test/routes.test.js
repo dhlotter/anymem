@@ -80,7 +80,7 @@ test("GET /stats shows the last cron run", async () => {
   const { last_run } = (await app.call("/stats")).json;
   assert.equal(last_run.job, "nightly");
   assert.equal(last_run.ok, true);
-  assert.deepEqual(Object.keys(last_run.summary), ["backup", "purge_trash", "reindex", "classify", "merge", "probation", "purge_old", "token"]);
+  assert.deepEqual(Object.keys(last_run.summary), ["backup", "purge_trash", "reindex", "classify", "cluster", "briefs", "merge", "probation", "purge_old", "token"]);
   assert.equal(last_run.summary.purge_old.audit, 0);
 });
 

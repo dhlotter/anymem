@@ -446,6 +446,18 @@ test("a shared subject's prompt never holds text of a member that belongs to a p
 
 // ------------------------------------------------------------------ retirement
 
+test("a person, a pet and an asset are never retired for having few members, a project and an area can be", async () => {
+  const app = await world();
+  const kept = [];
+  for (const kind of ["person", "pet", "asset"]) kept.push(await subject(app, `old-${kind}`, ["One memory."], { kind }));
+  const faded = [await subject(app, "old-project", ["One memory."], { kind: "project" }), await subject(app, "old-area", ["One memory."], { kind: "area" })];
+  app.clock.t += 61 * DAY;
+  model(app);
+  await run(app);
+  for (const s of kept) assert.notEqual((await subjectRow(app, s.card)).status, "retired");
+  for (const s of faded) assert.equal((await subjectRow(app, s.card)).status, "retired");
+});
+
 test("a subject with fewer than 3 live members that is over 60 days old is retired, and nothing else is", async () => {
   const app = await world();
   const two = await subject(app, "oldtwo", ["Old two a.", "Old two b."], { kind: "topic" });

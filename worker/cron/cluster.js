@@ -9,6 +9,7 @@
 // proposal never pulls a private subject's members into a shared one. At most three proposals a night.
 import { autoOn } from "../subjects/auto.js";
 import { LIVE } from "../system.js";
+import { createProposed } from "../subjects/propose.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const WINDOW_MS = 90 * DAY_MS;
@@ -160,11 +161,6 @@ async function firstChunks(env, ids) {
   return out;
 }
 
-/** createProposed is loaded when a proposal is made, so the step can be read and tested on its own. */
-async function loadPropose() {
-  return (await import("../subjects/propose.js")).createProposed;
-}
-
 /**
  * Work out the groups and, when apply is true, propose the ones that pass. With apply false nothing is written, and the
  * result is what a run would do with the budget it has.
@@ -222,7 +218,7 @@ export async function planClusters(env, { now, budget, apply, propose }) {
       }
       try {
         // step "cluster" makes createProposed write the audit row (route cluster.propose, actor cluster), so this step writes none.
-        const made = await (propose ?? (await loadPropose()))(env, { name: g.name, kind: g.kind, evidence: candidate.evidence.map((e) => ({ id: e.id, confidence: mean })), now, step: "cluster" });
+        const made = await (propose ?? createProposed)(env, { name: g.name, kind: g.kind, evidence: candidate.evidence.map((e) => ({ id: e.id, confidence: mean })), now, step: "cluster" });
         if (!made?.ok) {
           drop(g, made?.reason ?? "refused", { cohesion: mean });
           continue;

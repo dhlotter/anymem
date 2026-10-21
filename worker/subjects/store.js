@@ -198,6 +198,8 @@ export function createSubjectStore(db, now = Date.now) {
       set.updated_at = at;
       const columns = Object.keys(set);
       await db.prepare(`UPDATE subjects SET ${columns.map((c) => `${c} = ?`).join(", ")} WHERE id = ?`).bind(...columns.map((c) => set[c]), id).run();
+      // A dismissed proposal still has a pending card. Bringing the subject back makes the card active too, or recall would never offer it.
+      if (f.status === "active" && (await db.prepare("SELECT status FROM memories WHERE id = ?").bind(id).first())?.status === "pending") await memories.setStatus(id, "active");
       return get(id);
     },
 
