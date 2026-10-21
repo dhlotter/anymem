@@ -50,7 +50,7 @@ export async function updateSubject(c) {
   if (!changes.some((k) => body[k] !== undefined)) throw badRequest(`Send at least one of ${changes.join(", ")}.`);
   refuseSecret(body);
   const subject = await store.update(id, body);
-  if (body.name !== undefined || body.brief !== undefined) indexLater(c, id);
+  if (body.name !== undefined || body.brief !== undefined || body.status === "active") indexLater(c, id);
   return json({ ok: true, subject });
 }
 

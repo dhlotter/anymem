@@ -48,6 +48,7 @@ import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -503,15 +504,34 @@ def undash(text: str) -> str:
     return re.sub(r"\s*[\u2014\u2013]\s*|\s+--\s+", ", ", text)
 
 
+SUBJECT_MAX_WORDS = 5
+SUBJECT_PUNCT = " '\u2019.&-"
+
+
+def plain_name(name: str) -> "str | None":
+    """The name as plain text, or None. Letters of any script (with their marks), digits, a plain space, an apostrophe, a period, a hyphen
+    and an ampersand, at most 5 words, starting with a letter or a digit. Anything else is out: punctuation that makes a link, an address
+    or a sentence, and every invisible character (format, line and paragraph separators). Only the plain space is folded, so any other
+    white space makes the name not plain. The same rule as the Worker's, which checks again."""
+    text = unicodedata.normalize("NFC", name)
+    parts = [w for w in text.split(" ") if w]
+    text = " ".join(parts)
+    if not text or len(parts) > SUBJECT_MAX_WORDS or unicodedata.category(text[0])[0] not in "LN":
+        return None
+    for ch in text:
+        if ch not in SUBJECT_PUNCT and unicodedata.category(ch)[0] not in "LMN":
+            return None
+    return text
+
+
 def clean_subject(hint, text: str) -> "dict | None":
-    """The subject hint in its clean form, or None. A hint is data: a name of 2 to 60 characters with no control characters, a known kind,
+    """The subject hint in its clean form, or None. A hint is data: a name of 2 to 60 characters of plain text (see plain_name), a known kind,
     no secret or instruction in it, and the name must stand in the memory's own text as a whole word or phrase, so a hint cannot invent
     a subject the memory is not about. An unusable hint never costs the memory."""
     if not isinstance(hint, dict) or not isinstance(hint.get("name"), str) or hint.get("kind") not in SUBJECT_KINDS:
         return None
-    raw = hint["name"]
-    name = " ".join(raw.split())
-    if not 2 <= len(name) <= 60 or re.search(r"[\x00-\x1f\x7f-\x9f<>]", raw):
+    name = plain_name(hint["name"])
+    if name is None or not 2 <= len(name) <= 60:
         return None
     words = re.findall(r"[^\W_]+", name.lower())
     if not words or all(w in GENERIC_SUBJECTS or w.isdigit() for w in words):

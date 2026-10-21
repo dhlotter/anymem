@@ -270,9 +270,10 @@ test("a private subject is linked for the admin, for an open device, and not for
   const closed = await device(app, { allowPrivate: false });
   const open = await device(app, { allowPrivate: true });
   const text = "Pip and Dana went out";
-  assert.deepEqual(slugs(await assign(app, id, text, { actor: { kind: "admin", id: "admin" } })).sort(), ["dana", "pip"]);
-  assert.deepEqual(slugs(await assign(app, id, text, { actor: { kind: "browser", id: "me@example.com" } })).sort(), ["dana", "pip"]);
-  assert.deepEqual(slugs(await assign(app, id, text, { actor: { kind: "device", id: open.id } })).sort(), ["dana", "pip"]);
+  // Dana is shared, and a memory that belongs to a private subject gets no shared link, or every device could read it. So Pip only.
+  assert.deepEqual(slugs(await assign(app, id, text, { actor: { kind: "admin", id: "admin" } })), ["pip"]);
+  assert.deepEqual(slugs(await assign(app, id, text, { actor: { kind: "browser", id: "me@example.com" } })), ["pip"]);
+  assert.deepEqual(slugs(await assign(app, id, text, { actor: { kind: "device", id: open.id } })), ["pip"]);
   assert.deepEqual(slugs(await assign(app, id, text, { actor: { kind: "device", id: closed.id } })), ["dana"], "a closed device cannot find out that Pip exists by losing sight of its memory");
   assert.deepEqual(slugs(await assign(app, id, text, { actor: { kind: "device", id: "no-such-device" } })), ["dana"], "a device that cannot be found sees nothing private");
 });

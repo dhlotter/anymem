@@ -68,7 +68,7 @@ export async function assignMemory(env, { id, content, neighbours = [], origin =
   // 1. The candidates. A device without allow_private never gets a private subject.
   const closed = actor?.kind === "device";
   const { results: rows } = await env.DB.prepare(
-    `SELECT s.id, s.slug, s.kind, s.aliases, m.description FROM subjects s JOIN memories m ON m.id = s.id
+    `SELECT s.id, s.slug, s.kind, s.scope, s.aliases, m.description FROM subjects s JOIN memories m ON m.id = s.id
      WHERE s.status IN ('active', 'stale') AND m.deleted_at IS NULL${closed ? ` AND (s.scope = 'shared' OR ${SEES_PRIVATE_SQL})` : ""} ORDER BY s.id LIMIT ${MAX_SUBJECTS}`,
   ).bind(...(closed ? [actor.id] : [])).all();
   if (!rows.length) return { ...out, skipped: "no_subjects" };
@@ -119,11 +119,15 @@ export async function assignMemory(env, { id, content, neighbours = [], origin =
 
   // 4. Pairs that are already linked, and pairs a person said no to.
   const { results: known } = await env.DB.prepare(
-    "SELECT target_id FROM links WHERE source_id = ? AND link_type = 'about' UNION ALL SELECT target_id FROM link_rejections WHERE source_id = ? AND link_type = 'about'",
+    "SELECT l.target_id AS target_id, s.scope AS scope FROM links l LEFT JOIN subjects s ON s.id = l.target_id WHERE l.source_id = ? AND l.link_type = 'about' UNION ALL SELECT target_id, 'rejected' FROM link_rejections WHERE source_id = ? AND link_type = 'about'",
   ).bind(id, id).all();
   const taken = new Set(known.map((k) => k.target_id));
-  out.links = [...candidates]
-    .filter(([sid]) => !taken.has(sid))
+  // A memory that belongs to a private subject, or is about to, stays private: a shared link would make every device able to read it,
+  // because the private rule hides a memory only while it has no link to a shared subject. So it gets its private links and no others.
+  const fresh = [...candidates].filter(([sid]) => !taken.has(sid));
+  const keepsPrivate = known.some((k) => k.scope === "private") || fresh.some(([sid]) => subjects.get(sid).scope === "private");
+  out.links = fresh
+    .filter(([sid]) => !keepsPrivate || subjects.get(sid).scope === "private")
     .map(([sid, c]) => ({ subject_id: sid, slug: subjects.get(sid).slug, confidence: c.confidence, how: c.how }))
     .sort((a, b) => b.confidence - a.confidence || (a.slug < b.slug ? -1 : 1))
     .slice(0, MAX_LINKS);

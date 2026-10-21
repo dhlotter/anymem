@@ -1,6 +1,6 @@
 // The private rule, in one place. A device token whose device has allow_private 0 never sees a private subject, its card
 // memory, or a memory whose only about links go to private subjects. The admin token, a browser login and a device with
-// allow_private 1 see everything. Every route that returns a memory or a subject asks this module, none repeats the rule.
+// allow_private 1 see everything. A proposal nobody accepted yet is hidden from a closed device as well. Every route that returns a memory or a subject asks this module, none repeats the rule.
 // Each call is one query, however many ids it is given, and an actor that sees everything costs no query at all.
 
 /** True for an actor the rule can hide things from: a device token. The admin token and a browser login never are. */
@@ -12,9 +12,13 @@ export const mayBeRestricted = (actor) => actor?.kind === "device";
  */
 export const SEES_PRIVATE_SQL = "EXISTS (SELECT 1 FROM devices WHERE id = ? AND allow_private = 1)";
 
-// The memory is the card of a private subject, or it has an about link to a private subject and none to a shared one.
-const ABOUT = (col, scope) => `EXISTS (SELECT 1 FROM links l JOIN subjects s ON s.id = l.target_id WHERE l.source_id = ${col} AND l.link_type = 'about' AND s.scope ${scope})`;
-const HIDDEN_FOR = (col) => `NOT ${SEES_PRIVATE_SQL} AND (EXISTS (SELECT 1 FROM subjects c WHERE c.id = ${col} AND c.scope = 'private') OR (${ABOUT(col, "= 'private'")} AND NOT ${ABOUT(col, "<> 'private'")}))`;
+// A proposal is a subject the system suggested and nobody accepted: its row is `proposed`, or it was dismissed and its card is still
+// pending. A closed device never sees one (not the card, not the links to it), and a link to one never counts as a shared link, so it
+// cannot un-hide a memory that also belongs to a private subject. A proposal is always scope shared, so scope alone would not hide it.
+const PROPOSAL = (t) => `(${t}.status = 'proposed' OR EXISTS (SELECT 1 FROM memories pc WHERE pc.id = ${t}.id AND pc.status = 'pending'))`;
+// The memory is the card of a private subject or of a proposal, or it has an about link to a private subject and none to a shared one.
+const ABOUT = (col, cond) => `EXISTS (SELECT 1 FROM links l JOIN subjects s ON s.id = l.target_id WHERE l.source_id = ${col} AND l.link_type = 'about' AND ${cond})`;
+const HIDDEN_FOR = (col) => `NOT ${SEES_PRIVATE_SQL} AND (EXISTS (SELECT 1 FROM subjects c WHERE c.id = ${col} AND (c.scope = 'private' OR ${PROPOSAL("c")})) OR (${ABOUT(col, "s.scope = 'private'")} AND NOT ${ABOUT(col, `s.scope <> 'private' AND NOT ${PROPOSAL("s")}`)}))`;
 const HIDDEN_SQL = `SELECT j.value AS id FROM json_each(?) j WHERE ${HIDDEN_FOR("j.value")}`;
 
 /**
