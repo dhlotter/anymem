@@ -125,9 +125,11 @@ export function createStore(db, now = Date.now) {
    * @param {string} reason
    * @param {(cur: any, at: number) => Promise<{set?: Record<string, any>, tags?: string[]} | null>} plan
    * @param {number} [ifUpdatedAt]
+   * @param {{extra?: any[], quiet?: boolean}} [opts] extra statements run in the same batch, or alone when nothing about the memory changes,
+   *   so a caller can save its own rows with the change or not at all. quiet skips the read that returns the new state, for a caller that does not use it.
    * @returns {Promise<Entry>}
    */
-  async function mutate(id, reason, plan, ifUpdatedAt) {
+  async function mutate(id, reason, plan, ifUpdatedAt, { extra = [], quiet = false } = {}) {
     const cur = await load(id);
     if (!cur) throw notFound("No memory with that id.");
     if (ifUpdatedAt !== undefined && ifUpdatedAt !== cur.row.updated_at) {
@@ -137,7 +139,10 @@ export function createStore(db, now = Date.now) {
     const change = await plan(cur, at);
     const set = Object.fromEntries(Object.entries(change?.set ?? {}).filter(([k, v]) => cur.row[k] !== v));
     const tagsChanged = change?.tags !== undefined && !sameSet(change.tags, cur.tags);
-    if (!Object.keys(set).length && !tagsChanged) return toEntry(cur.row, cur.tags);
+    if (!Object.keys(set).length && !tagsChanged) {
+      if (extra.length) await db.batch(extra);
+      return toEntry(cur.row, cur.tags);
+    }
     const columns = [...Object.keys(set), "updated_at"];
     const statements = [
       db.prepare("INSERT INTO memory_versions (memory_id, seq, snapshot, reason, created_at) VALUES (?, ?, ?, ?, ?)").bind(id, cur.seq + 1, JSON.stringify(snapshotOf(cur)), reason, at),
@@ -149,13 +154,14 @@ export function createStore(db, now = Date.now) {
       statements.push(db.prepare("DELETE FROM memory_tags WHERE memory_id = ?").bind(id));
       statements.push(db.prepare("INSERT INTO memory_tags (memory_id, tag) SELECT ?, value FROM json_each(?)").bind(id, JSON.stringify(change.tags)));
     }
-    statements.push(db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").bind(id), db.prepare(FTS_INSERT).bind(id));
+    statements.push(db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").bind(id), db.prepare(FTS_INSERT).bind(id), ...extra);
     try {
       await db.batch(statements);
     } catch (err) {
       if (/UNIQUE constraint failed: memory_versions/.test(String(err?.message))) throw conflict("Another change landed first. Read the memory again and retry.", "lost_race");
       throw err;
     }
+    if (quiet) return null;
     const fresh = await load(id);
     return toEntry(fresh.row, fresh.tags);
   }
@@ -265,12 +271,14 @@ export function createStore(db, now = Date.now) {
 
     /**
      * Change content and tags. With ifUpdatedAt a stale caller gets a conflict. Tags given replace the stored tags,
-     * tags left out keep them. Hashtags in the content always count.
-     * @param {{id: string, content?: string, tags?: string[], ifUpdatedAt?: number}} args
+     * tags left out keep them. Hashtags in the content always count. The reason names the version row, so a change the system makes
+     * (a rebuilt brief) can be told from an edit.
+     * extra is a list of prepared statements that join the same batch (see mutate), and quiet returns null instead of the new state.
+     * @param {{id: string, content?: string, tags?: string[], ifUpdatedAt?: number, reason?: string, extra?: any[], quiet?: boolean}} args
      * @returns {Promise<Entry>}
      */
-    update({ id, content, tags, ifUpdatedAt }) {
-      return mutate(id, "update", async (cur) => contentChange(cur, await parseMemory(content ?? cur.row.content, tags ?? cur.tags)), ifUpdatedAt);
+    update({ id, content, tags, ifUpdatedAt, reason = "update", extra, quiet }) {
+      return mutate(id, reason, async (cur) => contentChange(cur, await parseMemory(content ?? cur.row.content, tags ?? cur.tags)), ifUpdatedAt, { extra, quiet });
     },
 
     /**
