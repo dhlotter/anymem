@@ -109,6 +109,55 @@ The screens, in order, are in [capture](capture-design.md). Size limits apply to
 
 The local redactor runs on the condensed transcript before it goes to any model, and again on every proposal before it is stored. It replaces secrets with `[REDACTED:kind]` and absolute home folders with `~/`. The list is in [privacy](privacy.md). It is a set of patterns, so it catches what it knows how to recognise and misses what it does not. The Worker screens for secrets again with the same shapes.
 
+## What anymem writes to disk
+
+Nothing on your machines runs on a schedule, and nothing exports or imports your store by itself. Export and import happen only when you run `backup.py`, a restore or the mass import. The one scheduled export is the Worker's nightly backup, which goes to a bucket in your own Cloudflare account and not to a disk. No hook writes into your notes or your project folders. Everything below sits in two folders under your home, or is an install step you ran. The Worker holds nothing on disk, its data lives in D1, Vectorize and R2.
+
+### While it works
+
+These live in `~/.cache/anymem`. `ANYMEM_CACHE_DIR` moves the folder. The folder is mode 0700 and the files are mode 0600, except two small stamp files that hold no secret, `check-last` and `recall-check.json`, which are mode 0644.
+
+| File | What it holds | How it stays small |
+|---|---|---|
+| `audit.log`, `audit.log.1` | One line per Worker call. Time, harness, script or hook, session, method, route, memory ids, status, milliseconds. No text. | At 512 KB it is kept once as `.1` |
+| `capture.log` | One line per capture run. The names of the memories it proposed and what happened to each, plus byte and character counts. No memory body. | Past 512 KB the older half goes |
+| `capture-state.json` | How far into each transcript capture has read | Offsets only |
+| `injection.log` | What the hooks added to a prompt. Characters, memory count and similarity scores. No text. | Trimmed to its newest lines |
+| `recall-outcomes-HARNESS.log` | One word per prompt (`injected`, `quiet` or `failed`) until the next Worker request carries the totals. | Moved aside when sent |
+| `capsule.json` | The last capsule the Worker sent, so a session still starts when the Worker is slow. This is memory text. | Replaced whole |
+| `person-index.json` | The saved person memories, kept ten minutes for the recall hook. This is memory text. | Replaced whole |
+| `recall-seen.json`, `ids.json` | Memory ids already shown in a session, and ids that scripts printed so a short prefix works | The newest 40 sessions, and the newest 500 ids |
+| `harness-hint.json`, `check-last`, `recall-check.json` | Small stamps and hints | One value each |
+| `failed.jsonl` | A save or capture that could not reach the Worker, with its text, retried later. This is memory text. | Emptied as each line is sent |
+| `credentials/` | The printed result of `credential_command`, in plain text, for 900 seconds by default. `ANYMEM_CRED_TTL=0` turns it off. | Deleted when the Worker answers 401 or 403 |
+| `*.lock` | Empty lock files | None needed |
+
+Three harnesses keep a copy of the conversation because they give a hook nothing to read.
+
+| Harness | File | What it holds |
+|---|---|---|
+| Kilo | `kilo/SESSION.jsonl` | The user and assistant text of each conversation, 20,000 characters per message at most. Written only while the capture policy allows it. Spools of sessions capture has forgotten are deleted. |
+| ZCode | `zcode-sessions/SESSION.jsonl` | Each prompt and reply of the session. Written only when capture is on and the session and folder are not excluded. |
+| Antigravity | `agy-state.json` | A key and a time per conversation, no text. Old entries are dropped past a cap. |
+
+The Kilo and ZCode files are full conversation text. They are redacted before capture reads them and not before they are written, so treat that folder like the transcripts of those harnesses. Turn capture off, or exclude a folder, and nothing is written.
+
+A capture run or a capsule check asks the local `claude` command one question. It runs in a folder made for that one call, mode 0700, with no settings loaded, and the folder is removed afterwards.
+
+### Only when you run something
+
+| Where | File | Written by |
+|---|---|---|
+| `~/.config/anymem` | `config.json`, mode 0600. The Worker address and your token. | `connect.py` |
+| `~/.config/anymem` | `deploy.json`, mode 0600. Names and ids of what setup made. Never a token. | `setup.py` |
+| `~/.config/anymem` | `device-XXXXXXXX.txt`, mode 0600, one new file each time. A device token, never printed. | `devices.py add` |
+| `~/.config/anymem/backups` | `anymem-DATE.json.gz`, the whole store, mode 0600. | `backup.py` |
+| `~/.config/anymem/adapters` | A starter adapter folder. | `install.py --new` |
+
+An install step edits the harness's own files. Claude Code and Codex install the plugin themselves, and Codex edits its `config.toml` after copying it to `config.toml.anymem.bak`. Kilo gets one file, `~/.config/kilo/plugin/anymem.js`. ZCode gets a plugin folder under `~/.zcode/anymem/plugin` that it registers. Antigravity gets one `anymem` entry in `hooks.json`, with a `.anymem.bak` copy first. DSH gets `dsh-hooks.json` and one marked block in each profile's patch file. Each adapter's uninstall removes exactly what it added.
+
+You can delete the cache folder at any time. The only thing in it that is not a copy of something else is `failed.jsonl`, a save that has not reached the Worker yet. Delete `config.json` and the machine is disconnected.
+
 ## Isolation
 
 1. **One person per deployment.** There are no teams. Every request resolves to the admin, a device or one browser login on the allow list.
