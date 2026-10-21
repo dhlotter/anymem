@@ -46,7 +46,7 @@ Every write goes to D1 through the Worker. Nothing on your machine syncs back up
 3. **Search.** A vector arm and a keyword arm run in parallel and are merged by rank. A reranker scores relevance. See [recall](recall.md).
 4. **Extract.** `POST /extract` turns a transcript into at most 2 memory proposals, plus any profile or person facts, and stores nothing. See [capture](capture-design.md).
 5. **Capsule.** Canonical, pinned memories tagged `capsule:core` and `capsule-slot:NAME`, served with an ETag. Over 9,500 characters the reply adds a warning, and the injected block, headings included, is cut at 9,500.
-6. **Nightly job**, 01:00 UTC. Back up, purge the trash, reindex, classify, propose subjects and rebuild subject briefs (only when `SUBJECTS_AUTO` is on, see [subjects](subjects.md)), merge near duplicate captures, retire captures nobody recalled, purge old audit rows. See [backups](backups.md) and [capture](capture-design.md).
+6. **Nightly job**, 01:00 UTC. Back up, purge the trash, reindex, classify, propose subjects and rebuild subject briefs (only when `SUBJECTS_AUTO` is on, and `SUBJECTS_BRIEFS` for briefs, see [subjects](subjects.md)), merge near duplicate captures, retire captures nobody recalled, purge old audit rows. See [backups](backups.md) and [capture](capture-design.md).
 7. **Dashboard.** Served from `worker/ui` to a browser login only. See [dashboard](dashboard.md).
 8. **Audit.** One row per authenticated request, 90 days. Refused and anonymous calls write no row.
 

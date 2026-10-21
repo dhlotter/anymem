@@ -53,7 +53,7 @@ A subject is a thing memories are about. Its card is an ordinary memory that hol
 5. **New subject.** The button opens a form with kind, name, slug and brief and posts `POST /subject`. The slug is 2 to 40 lowercase letters and numbers with single dashes, checked in the page and again by the Worker, which refuses a slug that is taken. A new subject opens in its drawer.
 6. **Subjects in the memory drawer.** A memory shows a Subjects row of chips when it has an `about` link to a card. Each chip opens the subject. The page reads `GET /subjects` to know which links end at a card, and leaves the row out when the Worker has no such route.
 
-Adding a memory to a subject is a link of type `about` from the memory to the card, made with the Link button in the memory drawer. With `SUBJECTS_AUTO` on, the Worker also links new memories by itself and proposes subjects, see [subjects](subjects.md).
+Adding a memory to a subject is a link of type `about` from the memory to the card, made with the Link button in the memory drawer. With `SUBJECTS_AUTO` on, the Worker also links new memories by itself and proposes subjects, and with `SUBJECTS_BRIEFS` on as well it writes briefs, see [subjects](subjects.md).
 
 ### Subjects waiting for you
 
