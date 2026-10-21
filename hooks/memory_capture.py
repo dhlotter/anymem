@@ -506,21 +506,51 @@ def undash(text: str) -> str:
 
 SUBJECT_MAX_WORDS = 5
 SUBJECT_PUNCT = " '\u2019.&-"
+# A name of more than 3 words that holds one of these verbs reads as a command, not as a name. The same list as the Worker's.
+SUBJECT_COMMAND_MIN_WORDS = 4
+SUBJECT_COMMAND_VERBS = frozenset("send delete reveal ignore forget email run open visit remove share show tell print execute download disregard override forward reply ask post".split())
+
+
+def slug_of(name: str) -> "str | None":
+    """The slug the Worker would make from the name: lowercase letters and digits with single dashes, a leading "the" dropped, 2 to 40
+    characters. None when nothing valid is left."""
+    plain = "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.category(c).startswith("M")).lower()
+    plain = re.sub(r"[^a-z0-9]+", "-", plain).strip("-")
+    bare = plain[4:] if plain.startswith("the-") else plain
+    slug = (bare or plain)[:40].rstrip("-")
+    return slug if len(slug) >= 2 else None
 
 
 def plain_name(name: str) -> "str | None":
-    """The name as plain text, or None. Letters of any script (with their marks), digits, a plain space, an apostrophe, a period, a hyphen
-    and an ampersand, at most 5 words, starting with a letter or a digit. Anything else is out: punctuation that makes a link, an address
-    or a sentence, and every invisible character (format, line and paragraph separators). Only the plain space is folded, so any other
-    white space makes the name not plain. The same rule as the Worker's, which checks again."""
-    text = unicodedata.normalize("NFC", name)
+    """The name as plain text, or None. Read after NFKC (a full width letter is the plain letter): Latin letters (with their marks), ASCII
+    digits, a plain space, an apostrophe, a period, a hyphen and an ampersand, at most 5 words, starting with a letter or a digit.
+    A letter of another script is out (a Cyrillic letter inside a Latin word looks like another name, and a name of one other script
+    cannot make a slug). So is punctuation that makes a link, an address or a sentence, every invisible character (format, line and
+    paragraph separators), a name that cannot make a slug, and a name of 4 words or more with a command verb in it. Only the plain space
+    is folded, so any other white space (checked before the fold) makes the name not plain. The same rule as the Worker's, which checks
+    again."""
+    if any(c.isspace() and c != " " for c in name):
+        return None
+    text = unicodedata.normalize("NFKC", name)
     parts = [w for w in text.split(" ") if w]
     text = " ".join(parts)
     if not text or len(parts) > SUBJECT_MAX_WORDS or unicodedata.category(text[0])[0] not in "LN":
         return None
     for ch in text:
-        if ch not in SUBJECT_PUNCT and unicodedata.category(ch)[0] not in "LMN":
-            return None
+        if ch in SUBJECT_PUNCT:
+            continue
+        cat = unicodedata.category(ch)[0]
+        if cat == "M":
+            continue
+        if cat == "L" and unicodedata.name(ch, "").startswith("LATIN"):
+            continue
+        if ch in "0123456789":
+            continue
+        return None
+    if slug_of(text) is None:
+        return None
+    if len(parts) >= SUBJECT_COMMAND_MIN_WORDS and any(w in SUBJECT_COMMAND_VERBS for w in re.findall(r"[^\W_]+", text.lower())):
+        return None
     return text
 
 

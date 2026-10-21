@@ -5,6 +5,7 @@ import { badRequest, conflict, notFound } from "../http.js";
 import { createStore } from "../memory/store.js";
 import { parseMemory } from "../memory/parse.js";
 import { LIVE } from "../system.js";
+import { DROP_PRIVATE_EVIDENCE_SQL } from "./private.js";
 
 export const KINDS = ["person", "pet", "asset", "project", "area", "topic"];
 export const STATUSES = ["proposed", "active", "stale", "retired"];
@@ -223,7 +224,13 @@ export function createSubjectStore(db, now = Date.now) {
       if (f.name !== undefined || f.brief !== undefined || revived) await memories.update({ id, content: cardContent({ slug: cur.slug, kind: cur.kind, name, brief }) });
       set.updated_at = at;
       const columns = Object.keys(set);
-      await db.prepare(`UPDATE subjects SET ${columns.map((c) => `${c} = ?`).join(", ")} WHERE id = ?`).bind(...columns.map((c) => set[c]), id).run();
+      const save = db.prepare(`UPDATE subjects SET ${columns.map((c) => `${c} = ?`).join(", ")} WHERE id = ?`).bind(...columns.map((c) => set[c]), id);
+      // A dismissed proposal that comes back turns into a shared subject, so evidence memories that have a private link since lose their link first.
+      if (f.status === "active" && cur.status === "retired") {
+        await db.batch([db.prepare(`${DROP_PRIVATE_EVIDENCE_SQL} AND EXISTS (SELECT 1 FROM memories WHERE id = ? AND status = 'pending')`).bind(id, id), save]);
+      } else {
+        await save.run();
+      }
       // A dismissed proposal still has a pending card. Bringing the subject back makes the card active too, or recall would never offer it.
       if (f.status === "active" && (await db.prepare("SELECT status FROM memories WHERE id = ?").bind(id).first())?.status === "pending") await memories.setStatus(id, "active");
       return get(id);

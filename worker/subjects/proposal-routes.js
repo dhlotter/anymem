@@ -4,6 +4,7 @@
 import { badRequest, conflict, json, notFound, readJson } from "../http.js";
 import { createStore } from "../memory/store.js";
 import { indexMemories } from "../search/indexer.js";
+import { DROP_PRIVATE_EVIDENCE_SQL } from "./private.js";
 import { PROPOSED_BRIEF } from "./propose.js";
 import { createSubjectStore } from "./store.js";
 
@@ -19,6 +20,9 @@ async function decide({ request, env, ctx, now, maxBody, memoryIds }, action) {
   memoryIds.push(id);
   const before = await subjects.get(id);
   // The guarded UPDATE is the only judge of "still proposed", so a read that went stale between two clicks cannot let both through.
+  // On accept, the evidence links of a memory that has a private link since go first, while the card is still a proposal that no closed
+  // device can see. The statement only touches a card that is still proposed.
+  if (action === "accept") await env.DB.prepare(`${DROP_PRIVATE_EVIDENCE_SQL} AND EXISTS (SELECT 1 FROM subjects WHERE id = ? AND status = 'proposed')`).bind(id, id).run();
   const claim = await env.DB.prepare("UPDATE subjects SET status = ?, updated_at = ? WHERE id = ? AND status = 'proposed'").bind(action === "accept" ? "active" : "retired", now(), id).run();
   if (claim.meta.changes === 0) throw notProposed();
   // A dismissed subject keeps its card (still pending, never shown) and its evidence links, and the slug stays taken so it is not proposed again.

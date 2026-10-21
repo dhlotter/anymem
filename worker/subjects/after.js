@@ -5,6 +5,8 @@
 import { auditStatement } from "../audit.js";
 import { assignMemory } from "./assign.js";
 import { autoOn } from "./auto.js";
+import { clearCiting } from "./clear.js";
+import { SHED_SHARED_SQL } from "../memory/store.js";
 import { SEES_PRIVATE_SQL } from "./private.js";
 import { proposeFromHint } from "./propose.js";
 
@@ -69,6 +71,9 @@ export async function afterSubjects(env, { id, content, neighbours = [], hint, a
     }
     let assigned = 0;
     if (statements.length) {
+      // A memory that now belongs to a private subject loses the links the system made to shared ones, in the same batch (the update in
+      // place of a memory a capture linked to a shared subject is the case: it must not keep being visible).
+      if (found.private_ids.length) statements.push(env.DB.prepare(SHED_SHARED_SQL).bind(id, "about", id));
       const done = await env.DB.batch(statements);
       // A link that was decided but not made lost a race (the card went, a person said no, a private link appeared), so it counts as failed.
       for (let i = 0; i < found.links.length; i++) {
@@ -76,6 +81,8 @@ export async function afterSubjects(env, { id, content, neighbours = [], hint, a
         else counters.bump("subjects.failed");
       }
       if (assigned) counters.bump("subjects.assigned", assigned);
+      // The shared briefs that cite a memory that is now private go at once.
+      if (found.private_ids.length) await clearCiting(env, { ids: [id], now, sharedOnly: true, why: "member.private" });
       if (found.ambiguous.length) counters.bump("subjects.ambiguous");
     }
     // A hint proposes a new subject only when the memory was linked to nothing. A device that may not see private subjects never proposes:

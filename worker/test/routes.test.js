@@ -56,7 +56,7 @@ test("GET /count counts live memories only", async () => {
 test("GET /stats on an empty store", async () => {
   const app = await createApp();
   const res = await app.call("/stats");
-  assert.deepEqual(res.json, { count: 0, by_status: {}, by_origin: {}, unvectorized: 0, unclassified: 0, subjects_on: false, subjects_auto: false, last_run: null, ...EMPTY_COUNTERS });
+  assert.deepEqual(res.json, { count: 0, by_status: {}, by_origin: {}, unvectorized: 0, unclassified: 0, subjects_on: false, subjects_auto: false, subjects_briefs: false, last_run: null, ...EMPTY_COUNTERS });
 });
 
 test("GET /stats counts by status and origin, unvectorized and unclassified", async () => {

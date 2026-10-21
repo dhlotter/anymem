@@ -2,6 +2,7 @@
 import { cleanLabel } from "../audit.js";
 import { badRequest, flag, forbidden, HttpError, intParam, json, notFound, readJson } from "../http.js";
 import { indexMemories } from "../search/indexer.js";
+import { clearCiting } from "../subjects/clear.js";
 import { canSee, hiddenIds } from "../subjects/private.js";
 import { REASONS, screenExplicit } from "../write/screen.js";
 import { adminHeld, adminOnlyMessage, adminOnlyTags, LINK_TYPES, normalizeTags, RESERVED_LINK_TYPES, STATUSES, TYPES } from "./parse.js";
@@ -159,6 +160,8 @@ const byId = (method) =>
     memoryIds.push(id);
     const entry = await createStore(env.DB, now)[method](id);
     indexLater(c, id);
+    // A memory that is now in the trash or replaced may no longer feed a brief, so every brief that cites it goes now (a forget, or an undo that closes it).
+    if (entry.deleted_at !== null || entry.valid_until !== null) await clearCiting(env, { ids: [id], now, ctx: c.ctx, why: "member.gone" });
     return json({ ok: true, entry });
   };
 
@@ -191,6 +194,10 @@ export async function link(c) {
   await guardDevice(c, source);
   await guardDevice(c, target);
   const { created } = await createStore(env.DB, now).link(source, target, type);
+  // A memory that joins a private subject may no longer feed a brief that every device can read, so the shared briefs that cite it go now.
+  if (type === "about" && (await env.DB.prepare("SELECT 1 AS n FROM subjects WHERE id = ? AND scope = 'private'").bind(target).first())) {
+    await clearCiting(env, { ids: [source], now, ctx: c.ctx, sharedOnly: true, why: "member.private" });
+  }
   return json({ ok: true, created });
 }
 

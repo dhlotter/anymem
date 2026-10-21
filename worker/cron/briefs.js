@@ -7,9 +7,12 @@
 // subject that keeps failing cannot hold up the healthy ones. A subject whose brief is pinned by hand is never touched. A brief a
 // person wrote counts as pinned: saving one through the API sets brief_pinned.
 //
-// A brief that was built is cleared before anything else when the members it came from are no longer the members that may feed
-// it: a member joined a private subject, was forgotten, or changed. The old text and its derived_from links go in one write, so a
-// rebuild that fails, runs out of budget or never comes leaves the subject with no brief, never with the old text.
+// A brief that cites a memory that may no longer feed it (trashed, replaced, or now in a private subject) is blanked at the moment
+// that happens, by subjects/clear.js, called from the routes that cause it. This step runs the same check for every card as a backup,
+// before anything else and whatever the flags say, because text that must go is not a thing to leave for a switch. A memory that was
+// only added to a subject, or edited, never blanks a brief: a good brief stays until it is rebuilt. A rebuild that fails, runs out of
+// budget or never comes leaves a blanked subject blank and stale, and leaves a subject that was not blanked with its old brief and the
+// reason it is stale.
 //
 // A model that does not answer is counted for each subject in stale_reason as model.fail.N. After 3 in a row the subject is
 // stale with that reason, and a subject that failed is tried after the healthy ones.
@@ -18,12 +21,17 @@
 // is pinned.
 //
 // The prompt of a subject holds its own members only. A shared subject leaves out a member that also belongs to a private
-// subject, so private text never reaches a card that every device can read. The step spends at most half of the shared
-// subrequest budget it finds when it starts, so merge always has some left.
+// subject, so private text never reaches a card that every device can read. The step spends what is left of the shared subrequest
+// budget when it starts minus what merge needs to examine one memory (MERGE_NEEDS), so merge always has some left, also on the Free budget of 40.
+// Building briefs needs SUBJECTS_AUTO and SUBJECTS_BRIEFS both on: a brief is a model's reading of free text, which is less certain than
+// a link, so it has its own switch.
 import { auditStatement } from "../audit.js";
 import { createStore } from "../memory/store.js";
 import { buildBrief, checkBrief, MEMBER_LIMIT, memberHash, renderBrief, withBrief } from "../subjects/brief.js";
-import { autoOn } from "../subjects/auto.js";
+import { briefsOn } from "../subjects/auto.js";
+import { auditRow, CLEAR_COST, CLEARED, clearIneligible } from "../subjects/clear.js";
+
+export { CLEARED };
 
 export const MAX_BUILDS = 8;
 export const MAX_RETIRES = 8;
@@ -36,13 +44,11 @@ const RETIRABLE_KINDS = new Set(["project", "area", "topic"]);
 const BUILD_COST = 4;
 const READ_COST = 2; // the first batch of reads and the batch that reads the members' text
 const RETIRE_COST = 1;
-// Clearing a brief is a card update: the read of the card and one batch. A subject that is rebuilt after it reads the card again.
-const CLEAR_COST = 2;
-const REREAD_COST = 1;
+// What merge needs to examine one candidate (its fixed cost of 3 and one candidate at 10, see merge.js, plus the two reads it makes before
+// its first check, which that check does not count). The briefs step leaves this much. Measured: with 13 left merge examined nothing.
+export const MERGE_NEEDS = 15;
 // After this many failed model calls in a row a subject is stale. The count lives in stale_reason as model.fail.N.
 export const STALE_AFTER = 3;
-// The stale_reason of a subject whose brief was cleared because its members changed.
-export const CLEARED = "members_changed";
 // After this many failed model calls in a row, with every build of the group failing, the model is taken to be down and the step stops.
 const OUTAGE_AFTER = 2;
 const PARALLEL = 4;
@@ -76,21 +82,6 @@ const parse = (text, fallback) => {
   }
 };
 
-/** The audit row of one system action on a subject. The script column keeps letters, digits and . : - only, so the check names use dots. */
-function auditRow(now, { route, ok, how, ids, started }) {
-  return {
-    ts: now(),
-    actor: { kind: "system", id: "brief" },
-    harness: "system",
-    script: `how:${how}`.replace(/_/g, "."),
-    method: "SYSTEM",
-    route,
-    status: ok ? 200 : 500,
-    durationMs: now() - started,
-    memoryIds: ids,
-  };
-}
-
 /** The newest members a subject is built from, as one statement. A shared subject leaves out members that are also in a private one. */
 const membersSql = (scope) =>
   `SELECT m.id, m.name, m.description, m.body, m.created_at, m.updated_at FROM links l JOIN memories m ON m.id = l.source_id
@@ -98,29 +89,6 @@ const membersSql = (scope) =>
    ORDER BY m.updated_at DESC, m.id DESC LIMIT ${MEMBER_LIMIT}`;
 
 const textOf = (m) => [m.name, m.description, m.body].filter(Boolean).join("\n");
-
-/**
- * Clear a built brief: the card text without its brief, the derived_from links gone, and the subject stale with built_at and the
- * hash reset, in one batch with an audit row. The card is a new version, so the old text can still be undone by the person.
- * No ifUpdatedAt: a privacy clear must not lose to an edit that landed a moment before.
- */
-async function clearBrief(env, { now, store }, subject, why) {
-  const started = now();
-  // A card edited by hand may have lost its frontmatter. The card is then made again with the frontmatter it needs.
-  const content = withBrief(subject.content, "") ?? `---\nname: ${subject.slug}\ndescription: ${subject.description}\nmetadata:\n  type: project\n---\n\n`;
-  const at = now();
-  await store.update({
-    id: subject.id,
-    content,
-    reason: "brief",
-    quiet: true,
-    extra: [
-      env.DB.prepare("DELETE FROM links WHERE source_id = ? AND link_type = 'derived_from'").bind(subject.id),
-      env.DB.prepare(`UPDATE subjects SET stale_reason = ?, built_at = NULL, member_hash = '', updated_at = ${CHANGED}, status = 'stale' WHERE id = ? AND status IN ('active', 'stale')`).bind(CLEARED, at, subject.id),
-      auditStatement(env.DB, auditRow(now, { route: "brief.clear", ok: true, how: why, ids: [subject.id], started })),
-    ],
-  });
-}
 
 /**
  * Build one subject's brief and save it, or mark it stale. The card, its links, the subject row and the audit row are saved in one
@@ -144,11 +112,12 @@ async function buildOne(env, { now, store }, subject, shown) {
     ]);
     return "outage";
   }
-  // The members may have changed while the model worked, so they are read again. A member that was trashed or replaced is refused.
+  // The members may have changed while the model worked, so they are read again. A member that was trashed or replaced is refused, and
+  // for a shared subject so is one that joined a private subject meanwhile (it is left out here, so a line that cites it fails the check).
   const { results } = await env.DB
     .prepare(
       `SELECT id, name, description, body, created_at, updated_at, deleted_at, valid_until, superseded_by, status FROM memories m
-       WHERE id IN (SELECT value FROM json_each(?)) AND EXISTS (SELECT 1 FROM links WHERE source_id = m.id AND target_id = ? AND link_type = 'about')`,
+       WHERE id IN (SELECT value FROM json_each(?)) AND EXISTS (SELECT 1 FROM links WHERE source_id = m.id AND target_id = ? AND link_type = 'about')${subject.scope === "private" ? "" : ` AND NOT ${IN_PRIVATE}`}`,
     )
     .bind(JSON.stringify(shown.map((m) => m.id)), card)
     .all();
@@ -205,10 +174,21 @@ const byTurn = (a, b) => {
  */
 export async function briefsStep(env, { now, budget }) {
   const out = { candidates: 0, built: 0, stale: 0, failed: 0, conflicts: 0, retired: 0, cleared: 0, pinned: 0, remaining: 0 };
-  if (!autoOn(env)) return { skipped: "off" };
-  // Merge runs after this step and works until the shared budget is gone, so this step takes at most half of what is left now.
+  // The backup clear comes first and does not depend on a switch: the routes blank a brief the moment its text must go, and this
+  // catches what they could not (a purge, a merge, a request that died). Pinned and retired subjects are cleared too.
+  let cleared = 0;
+  if (budget.has(1)) {
+    try {
+      cleared = (await clearIneligible(env, { now, room: () => budget.has(CLEAR_COST + 1) })).length;
+    } catch (err) {
+      console.error("brief clear failed", err?.name);
+    }
+  }
+  if (!briefsOn(env)) return cleared ? { skipped: "off", cleared } : { skipped: "off" };
+  out.cleared = cleared;
+  // Merge runs after this step and works until the shared budget is gone, so this step leaves it what it needs to run at all.
   const startedAt = budget.spent;
-  const share = Math.floor(budget.left() / 2);
+  const share = Math.max(0, budget.left() - MERGE_NEEDS);
   const has = (n) => budget.has(n) && budget.spent - startedAt + n <= share;
   if (!has(READ_COST + BUILD_COST)) return { ...out, skipped: "budget" };
   // One batch reads the subjects, how many live members each has, and the newest members of each with their change times.
@@ -239,7 +219,6 @@ export async function briefsStep(env, { now, budget }) {
   const store = createStore(env.DB, now);
   const candidates = [];
   for (const row of subjectRows) {
-    // built_at is reset when a brief is cleared, built_before keeps the turn the subject had.
     const subject = { ...row, name: nameOf(row), fields: parse(row.fields, {}), built_before: row.built_at };
     if (isPinned(subject.fields)) {
       out.pinned++;
@@ -247,24 +226,6 @@ export async function briefsStep(env, { now, budget }) {
     }
     const members = newest.get(row.id) ?? [];
     const hash = await memberHash(members);
-    // A built brief whose members are no longer the ones it came from is cleared first, whatever happens to the rebuild.
-    if (row.built_at !== null && hash !== row.member_hash) {
-      if (!has(CLEAR_COST + (members.length ? REREAD_COST + BUILD_COST : 0))) continue;
-      try {
-        await clearBrief(env, { now, store }, subject, members.length ? "members.changed" : "members.gone");
-      } catch (err) {
-        console.error("brief clear failed", err?.name);
-        out.failed++;
-        continue;
-      }
-      out.cleared++;
-      Object.assign(subject, { status: "stale", stale_reason: CLEARED, built_at: null, member_hash: "" });
-      if (members.length) {
-        // The card changed, so the next write to it needs its new change time and text.
-        const card = await env.DB.prepare("SELECT content, updated_at FROM memories WHERE id = ?").bind(row.id).first();
-        Object.assign(subject, { content: card.content, card_updated_at: card.updated_at });
-      }
-    }
     // The 60 days run from the last status change (accepting a proposal sets updated_at), not from when the subject was first made.
     if (RETIRABLE_KINDS.has(row.kind) && (live.get(row.id) ?? 0) < RETIRE_BELOW && now() - Math.max(row.created_at, row.updated_at) > RETIRE_AFTER_MS) {
       if (out.retired < MAX_RETIRES && has(RETIRE_COST + BUILD_COST)) {

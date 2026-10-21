@@ -17,6 +17,7 @@ import { takeWriteSlot, writeRefused } from "../limits.js";
 import { ADMIN_ORIGINS, adminHeld, adminOnlyMessage, adminOnlyTags, parseMemory } from "../memory/parse.js";
 import { createStore } from "../memory/store.js";
 import { afterSubjects } from "../subjects/after.js";
+import { clearCiting } from "../subjects/clear.js";
 import { hiddenIds } from "../subjects/private.js";
 import { indexMemories } from "../search/indexer.js";
 import { judgeConflict } from "./conflict.js";
@@ -195,6 +196,8 @@ async function run({ env, ctx, now, actorId, actorKind, memoryIds }, w, counters
     try {
       await store.supersede(decision.oldId, entry.id, now());
       memoryIds.push(decision.oldId);
+      // The replaced memory may no longer feed a brief, so the briefs that cite it go now. A failure here is the nightly step's to catch.
+      await clearCiting(env, { ids: [decision.oldId], now, ctx, why: "member.gone" }).catch(() => console.error("brief clear failed"));
       counters.bump("conflicts.replaced");
       body.replaced = { id: decision.oldId, reason: "contradiction" };
     } catch {

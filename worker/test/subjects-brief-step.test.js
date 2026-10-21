@@ -14,7 +14,7 @@ import { createProposed } from "../subjects/propose.js";
 import { KINDS } from "../subjects/store.js";
 import { memberHash } from "../subjects/brief.js";
 
-const ON = { SUBJECTS: "on", SUBJECTS_AUTO: "on" };
+const ON = { SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_BRIEFS: "on" };
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
 
 /** A subject with its members, written straight to the store. @returns {Promise<{card: string, ids: string[]}>} */
@@ -60,15 +60,16 @@ const subjectRow = (app, id) => row(app, id).then(() => app.env.DB.prepare("SELE
 
 // ------------------------------------------------------------------ the flags
 
-test("with either flag off the step does nothing at all", async () => {
-  for (const env of [{}, { SUBJECTS: "on" }, { SUBJECTS_AUTO: "on" }, { SUBJECTS: "off", SUBJECTS_AUTO: "on" }, { SUBJECTS: "on", SUBJECTS_AUTO: "off" }]) {
+test("with any of the three flags off the step builds nothing, and only looks for text that must go", async () => {
+  const cases = [{}, { SUBJECTS: "on" }, { SUBJECTS_AUTO: "on" }, { SUBJECTS: "off", SUBJECTS_AUTO: "on", SUBJECTS_BRIEFS: "on" }, { SUBJECTS: "on", SUBJECTS_AUTO: "off", SUBJECTS_BRIEFS: "on" }, { SUBJECTS: "on", SUBJECTS_AUTO: "on" }, { SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_BRIEFS: "off" }, { SUBJECTS: "on", SUBJECTS_BRIEFS: "on" }, { SUBJECTS_BRIEFS: "on" }];
+  for (const env of cases) {
     const app = await world(env);
     const { card } = await subject(app, "pip", ["Pip weighs 12 kilos."]);
     model(app);
     const before = await subjectRow(app, card);
     const { out, spent } = await run(app);
     assert.deepEqual(out, { skipped: "off" }, JSON.stringify(env));
-    assert.equal(spent, 0, "not one query");
+    assert.equal(spent, 1, "one read, the look for text that must go");
     assert.equal(app.env.AI.calls.length, 0);
     assert.deepEqual(await subjectRow(app, card), before);
     assert.equal((await auditRows(app)).length, 0);
@@ -384,7 +385,7 @@ test("at most 8 builds a night, and the rest wait for the next night", async () 
   const first = await run(app);
   assert.equal(MAX_BUILDS, 8);
   assert.deepEqual([first.out.candidates, first.out.built, first.out.remaining], [10, 8, 2]);
-  assert.equal(first.spent, 2 + 8 * 4);
+  assert.equal(first.spent, 1 + 2 + 8 * 4);
   assert.ok(first.spent <= 40, `a night with 8 builds used ${first.spent} subrequests`);
   app.clock.t += DAY;
   const second = await run(app);
@@ -395,20 +396,20 @@ test("the step stops when the subrequest budget says no, and never goes over it"
   const app = await world();
   for (let i = 0; i < 10; i++) await subject(app, `thing${i}`, [`Thing ${i} is here.`], { kind: "topic" });
   model(app);
-  // The step takes at most half of what the run has left, so a budget of 40 gives it 20.
+  // The step leaves merge the 15 it needs to run at all, so a budget of 40 gives it 25: one read for text that must go, two reads, then builds.
   const small = await run(app, { subrequests: 40 });
-  assert.ok(small.spent <= 20, `spent ${small.spent}`);
-  assert.equal(small.out.built, 4);
-  assert.equal(small.out.remaining, 6);
+  assert.ok(small.spent <= 25, `spent ${small.spent}`);
+  assert.equal(small.out.built, 5);
+  assert.equal(small.out.remaining, 5);
   const tight = await world();
   await subject(tight, "pip", ["Pip weighs 12 kilos."]);
   model(tight);
-  const none = await run(tight, { subrequests: 11 });
-  assert.deepEqual(none, { out: { candidates: 0, built: 0, stale: 0, failed: 0, conflicts: 0, retired: 0, cleared: 0, pinned: 0, remaining: 0, skipped: "budget" }, spent: 0 });
+  const none = await run(tight, { subrequests: 21 });
+  assert.deepEqual(none, { out: { candidates: 0, built: 0, stale: 0, failed: 0, conflicts: 0, retired: 0, cleared: 0, pinned: 0, remaining: 0, skipped: "budget" }, spent: 1 });
   assert.equal(tight.env.AI.calls.length, 0);
-  const exact = await run(tight, { subrequests: 12 });
+  const exact = await run(tight, { subrequests: 22 });
   assert.equal(exact.out.built, 1);
-  assert.equal(exact.spent, 6);
+  assert.equal(exact.spent, 7);
 });
 
 test("a build costs 4 subrequests, a failed one 3, and a night with nothing to do costs 1", async () => {
@@ -417,25 +418,25 @@ test("a build costs 4 subrequests, a failed one 3, and a night with nothing to d
   model(app);
   const one = await run(app);
   assert.equal(one.out.built, 1);
-  assert.equal(one.spent, 2 + 4, "two reads, then the model, a fresh read of the members, the card read and one batch");
+  assert.equal(one.spent, 1 + 2 + 4, "the look for text that must go, two reads, then the model, a fresh read of the members, the card read and one batch");
   app.clock.t += DAY;
   const idle = await run(app);
-  assert.equal(idle.spent, 1, "one batch of reads");
+  assert.equal(idle.spent, 1 + 1, "the look for text that must go, and one batch of reads");
   // A subject that was never built, the model forges a line: a failed check saves the stale mark and its audit row in one batch.
   const fresh = await subject(app, "corolla", ["The Corolla is blue."], { kind: "asset" });
   model(app, async (lines) => lines.map((l) => ({ ...l, ids: [] })));
   const failed = await run(app);
   assert.equal(failed.out.stale, 1);
-  assert.equal(failed.spent, 2 + 3);
+  assert.equal(failed.spent, 1 + 2 + 3);
   assert.equal((await subjectRow(app, fresh.card)).stale_reason, "no_citation");
-  // A built subject whose member changed: the old brief is cleared first (the card read and one batch), the card is read again, then the build.
+  // A built subject whose member was edited is not cleared, the brief stays until the new one is saved over it.
   app.clock.t += DAY;
   await storeOf(app).update({ id: (await rows(app, "SELECT source_id FROM links WHERE target_id = ?", card))[0].source_id, content: note("pip-note-0", "A sample.", "Pip weighs 13 kilos.") });
   model(app);
   const changed = await run(app);
-  assert.equal(changed.out.cleared, 1);
+  assert.equal(changed.out.cleared, 0);
   assert.equal(changed.out.built, 2, "Pip and the stale Corolla");
-  assert.equal(changed.spent, 2 + 3 + 2 * 4);
+  assert.equal(changed.spent, 1 + 2 + 2 * 4);
 });
 
 test("the oldest brief goes first, a subject never built before all, and a stale subject after the healthy ones", async () => {
@@ -450,8 +451,8 @@ test("the oldest brief goes first, a subject never built before all, and a stale
   await set("aa", null);
   await set("cc", 200);
   model(app);
-  // The three that were built before are cleared first (3 each), then room for exactly three builds. The order is the one before the clear.
-  const { out } = await run(app, { subrequests: 50 });
+  // Room for exactly three builds: the step keeps 15 for merge, and spends 1 on the look for text that must go and 2 on reads.
+  const { out } = await run(app, { subrequests: 30 });
   assert.equal(out.built, 3);
   assert.deepEqual(app.prompts.map(subjectOf), ["Aa", "Bb", "Cc"]);
 });
@@ -717,7 +718,7 @@ test("a member that later joins a private subject leaves the shared brief at onc
   assert.equal(app.prompts.map(subjectOf).filter((n) => n === "Cottage").length, 1, "no member is left to build the cottage from, so the model is not asked again");
   assert.equal(app.prompts.map(subjectOf).filter((n) => n === "Dana").length, 1, "Dana's own brief is built from her own member");
   const audit = (await auditRows(app)).filter((a) => a.route === "brief.clear");
-  assert.deepEqual(audit.map((a) => [a.actor_kind, a.harness, a.script, a.status, JSON.parse(a.memory_ids)]), [["system", "system", "how:members.gone", 200, [shared]]]);
+  assert.deepEqual(audit.map((a) => [a.actor_kind, a.harness, a.script, a.status, JSON.parse(a.memory_ids)]), [["system", "system", "how:member.gone", 200, [shared]]]);
 });
 
 test("when the last member is forgotten the brief goes with it", async () => {
@@ -735,16 +736,16 @@ test("when the last member is forgotten the brief goes with it", async () => {
   assert.equal(modelCalls(app), 1);
 });
 
-test("a rebuild that fails a check, a model that is down and a night with no budget all leave no old text behind", async () => {
+test("a rebuild that fails a check, a model that is down and a night with no budget all leave no old text behind a forgotten member", async () => {
   for (const how of ["check", "model", "budget"]) {
     const app = await world();
     const { card, ids } = await subject(app, "pip", ["Pip weighs 12 kilos.", "Pip is secretly fed at night."]);
     model(app);
     await run(app);
     assert.match((await row(app, card)).body, /secretly fed/);
-    // the member that says the secret changes, so the brief no longer comes from the members it was built from
+    // the member that says the secret is forgotten, so the brief came from a member that may no longer feed it
     app.clock.t += DAY;
-    await storeOf(app).update({ id: ids[1], content: note("pip-note-1", "A sample.", "Pip is fed at night.") });
+    await storeOf(app).softDelete(ids[1]);
     if (how === "check") model(app, async (lines) => lines.map((l, i) => (i === 0 ? { ...l, ids: [] } : l)));
     if (how === "model") app.env.AI.reply(SMALL_MODEL, () => { throw new Error("down"); });
     const { out } = await run(app, { subrequests: how === "budget" ? 16 : 500 });
@@ -760,19 +761,43 @@ test("a rebuild that fails a check, a model that is down and a night with no bud
   }
 });
 
-test("the clear is a version of the card, so the person can still undo it", async () => {
+test("a member that is added or edited never blanks a good brief, and a rebuild that fails leaves it with the reason it is stale", async () => {
+  for (const how of ["check", "model", "budget"]) {
+    const app = await world();
+    const { card, ids } = await subject(app, "pip", ["Pip weighs 12 kilos.", "Pip is fed at night."]);
+    model(app);
+    await run(app);
+    const built = (await row(app, card)).body;
+    assert.match(built, /fed at night/);
+    app.clock.t += DAY;
+    await storeOf(app).update({ id: ids[1], content: note("pip-note-1", "A sample.", "Pip is fed twice at night.") });
+    const added = await seed(app, { name: "pip-note-2", text: "Pip loves the beach.", origin: "capture" });
+    await about(app, added, card);
+    if (how === "check") model(app, async (lines) => lines.map((l, i) => (i === 0 ? { ...l, ids: [] } : l)));
+    if (how === "model") app.env.AI.reply(SMALL_MODEL, () => { throw new Error("down"); });
+    const { out } = await run(app, { subrequests: how === "budget" ? 16 : 500 });
+    assert.equal(out.cleared, 0, how);
+    assert.equal((await row(app, card)).body, built, `${how}: the good brief is still there`);
+    assert.equal((await rows(app, "SELECT * FROM links WHERE source_id = ? AND link_type = 'derived_from'", card)).length, 2, how);
+    const s = await subjectRow(app, card);
+    assert.equal(s.stale_reason, { check: "no_citation", model: "model.fail.1", budget: "" }[how], how);
+    assert.equal(s.status, how === "check" ? "stale" : "active", how);
+  }
+});
+
+test("a clear leaves no version of the card that holds the old brief", async () => {
   const app = await world();
   const { card, ids } = await subject(app, "pip", ["Pip weighs 12 kilos."]);
   model(app);
   await run(app);
-  const built = (await row(app, card)).content;
+  assert.match((await row(app, card)).body, /12 kilos/);
   await storeOf(app).softDelete(ids[0]);
   app.clock.t += DAY;
   await run(app);
   assert.equal((await row(app, card)).body, "");
-  assert.deepEqual((await rows(app, "SELECT reason FROM memory_versions WHERE memory_id = ? ORDER BY seq", card)).map((r) => r.reason), ["brief", "brief"]);
-  await storeOf(app).undo(card);
-  assert.equal((await row(app, card)).content, built);
+  const versions = await rows(app, "SELECT seq, snapshot FROM memory_versions WHERE memory_id = ?", card);
+  assert.ok(versions.every((v) => !/12 kilos/.test(v.snapshot)), "no version holds the text");
+  assert.ok(versions.every((v) => JSON.parse(v.snapshot).body === ""));
 });
 
 test("a subject that is not built, or whose members did not change, is never cleared, and a pinned subject keeps its text", async () => {
@@ -792,15 +817,19 @@ test("a subject that is not built, or whose members did not change, is never cle
   assert.match((await row(app, fresh.card)).body, /^Now\n- /);
 });
 
-test("a private subject that is built is cleared the same way, from its own members", async () => {
+test("a private subject is cleared when its own member is forgotten, and not when the member also joins another private subject", async () => {
   const app = await world();
   const { card, ids } = await subject(app, "dana", ["Dana is allergic to nuts."], { kind: "person", scope: "private" });
+  const other = await addSubject(app, { slug: "wren", kind: "person", name: "Wren", scope: "private" });
   model(app);
   await run(app);
   assert.match((await row(app, card)).body, /allergic/);
-  await storeOf(app).unlink(ids[0], card, "about");
+  await about(app, ids[0], other);
   app.clock.t += DAY;
-  assert.equal((await run(app)).out.cleared, 1);
+  assert.equal((await run(app)).out.cleared, 0, "a private card may hold text of any private subject's member");
+  await storeOf(app).softDelete(ids[0]);
+  app.clock.t += DAY;
+  assert.equal((await run(app)).out.cleared, 2, "both private subjects had built a brief from it");
   assert.equal((await row(app, card)).body, "");
 });
 
@@ -826,7 +855,7 @@ test("a proposal accepted more than 60 days after it was made is not retired the
   assert.equal((await run(app)).out.retired, 1, "sixty days after the accept it is retired, with fewer than 3 members");
 });
 
-test("the step takes at most half of what is left, so merge still has budget on the Free limit of 40", async () => {
+test("the step leaves merge the 15 it needs to run, so merge still has budget on the Free limit of 40", async () => {
   const app = await world();
   for (let i = 0; i < 8; i++) await subject(app, `s${i}x`, [`Subject ${i} note.`], { kind: "topic" });
   model(app);
@@ -834,8 +863,8 @@ test("the step takes at most half of what is left, so merge still has budget on 
   const budget = createBudget({ now, subrequests: 40 });
   budget.spent = 6; // what the steps before this one used
   const out = await briefsStep(countedEnv(app.env, budget), { now, budget });
-  assert.ok(budget.spent - 6 <= 17, `the step used ${budget.spent - 6} of the 34 that were left`);
-  assert.ok(budget.left() >= 17, `${budget.left()} are left for the steps after it`);
+  assert.ok(budget.spent - 6 <= 21, `the step used ${budget.spent - 6} of the 34 that were left`);
+  assert.ok(budget.left() >= 15, `${budget.left()} are left for the steps after it`);
   assert.ok(out.built >= 1 && out.built < 8, "it did some work and left the rest for the next night");
   assert.equal(out.remaining, 8 - out.built);
 });
@@ -849,7 +878,7 @@ test("in a whole night on the Free limit, merge still runs after eight subjects 
   app.clock.t += 1000;
   const night = await runMaintenance(app.env, () => app.clock.t, { subrequests: 40, steps: ["briefs", "merge"] });
   assert.ok(night.summary.briefs.built >= 1);
-  assert.ok(night.summary.briefs.subrequests <= 20, `briefs used ${night.summary.briefs.subrequests}`);
+  assert.ok(night.summary.briefs.subrequests <= 25, `briefs used ${night.summary.briefs.subrequests}`);
   assert.ok(night.summary.merge.examined >= 1, `merge examined ${night.summary.merge.examined} with ${night.summary.merge.subrequests} subrequests`);
 });
 
