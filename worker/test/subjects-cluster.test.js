@@ -245,12 +245,12 @@ test("without the budget for a check the group is dropped and counted, never pro
   assert.equal(none.spent, 0);
 });
 
-test("a group that passes its check but leaves no budget for the proposal is dropped and counted", async () => {
+test("a group is not even checked when the budget cannot also pay for its proposal", async () => {
   const app = await clusterApp();
   await group(app, { n: 6, topic: "corolla", tag: "corolla" });
   await indexAll(app);
   const propose = stubPropose();
-  // the check is the cheapest part: three reads, one vector call, and then too little for createProposed
+  // three reads, then one vector call and createProposed are priced together, so a group is never checked and then left unproposed
   const thin = await runStep(app, clusterStep, { propose, subrequests: 3 + 1 + 9 });
   assert.equal(thin.summary.proposed, 0);
   assert.equal(propose.calls.length, 0);

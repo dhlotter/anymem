@@ -220,11 +220,6 @@ export async function planClusters(env, { now, budget, apply, propose }) {
         out.candidates.push(candidate);
         continue;
       }
-      // The proposal itself must fit too. A group that passed but cannot be proposed waits for tomorrow.
-      if (!budget.has(PROPOSE_COST)) {
-        drop(g, "skipped_budget", { cohesion: mean });
-        continue;
-      }
       try {
         // step "cluster" makes createProposed write the audit row (route cluster.propose, actor cluster), so this step writes none.
         const made = await (propose ?? (await loadPropose()))(env, { name: g.name, kind: g.kind, evidence: candidate.evidence.map((e) => ({ id: e.id, confidence: mean })), now, step: "cluster" });
