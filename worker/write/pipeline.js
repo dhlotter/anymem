@@ -17,6 +17,7 @@ import { takeWriteSlot, writeRefused } from "../limits.js";
 import { ADMIN_ORIGINS, adminHeld, adminOnlyMessage, adminOnlyTags, parseMemory } from "../memory/parse.js";
 import { createStore } from "../memory/store.js";
 import { hiddenIds } from "../subjects/private.js";
+import { proposeFromHint } from "../subjects/propose.js";
 import { indexMemories } from "../search/indexer.js";
 import { judgeConflict } from "./conflict.js";
 import { classifyKind } from "./kind.js";
@@ -32,12 +33,14 @@ const LIVE_SAME = "deleted_at IS NULL AND valid_until IS NULL";
 const round4 = (n) => Math.round(n * 10_000) / 10_000;
 
 /** Index and classify after the reply has gone. Each can fail alone, and the nightly job picks up what is missing. */
-async function afterWrite(env, id, now) {
+async function afterWrite(env, id, now, hint) {
   const counters = createCounters(env.DB, now);
   await Promise.allSettled([
     indexMemories(env, [id], now).catch(() => console.error("indexing failed")),
     classifyKind(env, id, counters),
   ]);
+  // The extractor's hint may become a proposed subject. It never fails the write, and without both subject flags it does nothing.
+  if (hint) await proposeFromHint(env, { memoryId: id, hint, now }).catch(() => console.error("proposing a subject failed"));
   await counters.flush();
 }
 
@@ -58,6 +61,7 @@ async function afterWrite(env, id, now) {
  * @property {string} origin
  * @property {string} harness
  * @property {string} session
+ * @property {{name: string, kind: string}} [subject] the extractor's hint that this memory introduces a named thing, already cleaned by the route
  */
 
 /**
@@ -196,6 +200,6 @@ async function run({ env, ctx, now, actorId, actorKind, memoryIds }, w, counters
   }
 
   // 10
-  ctx.waitUntil(afterWrite(env, entry.id, now));
+  ctx.waitUntil(afterWrite(env, entry.id, now, w.subject));
   return { status: 200, body };
 }
