@@ -2,7 +2,7 @@
 // fields, add an alias, change the scope, retire. It is the memory drawer's shell (mountPanel), so it slides in the same way and keeps
 // the page behind it inert. Its actions all start with subject so it never answers the memory drawer on the same screen.
 import { badge, icon, memoryLink, segmented } from "./components.js";
-import { linksView, mountPanel } from "./drawer.js";
+import { linksView, madeBy, mountPanel } from "./drawer.js";
 import { attempt, formValues, notify, onAction, onChange, onSubmit } from "./dom.js";
 import { ago, count, formatTime, titleOf } from "./format.js";
 import { html } from "./html.js";
@@ -15,13 +15,22 @@ export const statusMark = (status) => (status === "active" ? html`<span class="m
 
 const fieldName = (kind, key) => (FIELD_KEYS[kind]?.includes(key) ? fieldLabel(key) : key);
 
-/** The members as a table, a row to a memory. A row opens the memory in the memory drawer. */
-const membersView = (s) => {
+/** The about links that run into the card, by the id of the memory they come from. A member the system linked carries its confidence. */
+const memberLinks = (links) => new Map((links ?? []).filter((l) => l.type === "about" && l.direction === "in").map((l) => [l.other_id, l]));
+
+/** The members as a table, a row to a memory. A row opens the memory in the memory drawer. A member the system linked says so with its confidence, and Not this refuses the link for good. */
+const membersView = (s, links) => {
   const hidden = s.member_count - s.members.length;
+  const made = memberLinks(links);
   return html`<h3 class="h3">Members</h3>${s.members.length
     ? html`<div class="scroll" tabindex="0" role="region" aria-label="Members"><table class="data data--grid is-clickable data--members"><caption class="sr">The memories about this subject. A row opens the memory.</caption>
-      <thead><tr><th scope="col" class="th">Memory</th><th scope="col" class="th num">Changed</th></tr></thead>
-      <tbody>${s.members.map((m) => html`<tr data-id="${m.id}"><th scope="row" class="mem__cell"><a class="mem__title" href="${memoryLink(m.id)}">${titleOf(m)}</a></th><td class="num nowrap" title="${formatTime(m.updated_at)}">${ago(m.updated_at, s.now)}</td></tr>`)}</tbody></table></div>
+      <thead><tr><th scope="col" class="th">Memory</th><th scope="col" class="th num">Changed</th><th scope="col" class="th"><span class="sr">Actions</span></th></tr></thead>
+      <tbody>${s.members.map((m) => {
+        const l = made.get(m.id);
+        const system = l?.made_by === "system";
+        return html`<tr data-id="${m.id}"><th scope="row" class="mem__cell"><a class="mem__title" href="${memoryLink(m.id)}">${titleOf(m)}</a>${system ? html`<span class="mem__desc">${madeBy(l)}</span>` : ""}</th><td class="num nowrap" title="${formatTime(m.updated_at)}">${ago(m.updated_at, s.now)}</td>
+          <td class="cell__act">${system ? html`<button type="button" class="btn btn--quiet" data-action="subject-unlink" data-other="${m.id}">Not this<span class="sr"> member, ${titleOf(m)}</span></button>` : ""}</td></tr>`;
+      })}</tbody></table></div>
       ${hidden > 0 ? html`<p class="muted small">Showing the newest ${count(s.members.length, "memory", "memories")} of ${count(s.member_count, "memory", "memories")}.</p>` : ""}`
     : html`<p class="muted">No memory is about this subject yet. Open a memory, choose Link, and link it to this card with the type about.</p>`}`;
 };
@@ -31,11 +40,13 @@ export function subjectView(subject, links, now, back) {
   const s = { members: [], member_count: subject.members?.length ?? 0, ...subject, now };
   const fields = Object.entries(s.fields ?? {});
   const retired = s.status === "retired";
+  const proposed = s.status === "proposed";
   return html`<article class="detail" aria-labelledby="subject-h">
     <header class="detail__head"><h2 id="subject-h" class="detail__title" tabindex="-1">${s.name}</h2><a class="btn btn--icon" href="${back}" aria-label="Close this subject" data-close>${icon("close")}</a></header>
     <p class="detail__chips">${badge(s.kind)}${statusMark(s.status)}${badge(s.scope, s.scope === "private" ? "warn" : "muted")}<span class="mono muted">${s.slug}</span></p>
+    ${proposed ? html`<p class="notice" role="status">${icon("info")}<span>Proposed, waiting for your click. The memories listed below are why anymem thinks this subject exists. Accept puts it in recall. Dismiss keeps it from coming back.</span><button type="button" class="btn btn--primary" data-action="subject-accept">Accept</button><button type="button" class="btn" data-action="subject-dismiss">Dismiss</button></p>` : ""}
     ${retired ? html`<p class="notice" role="status">${icon("info")}<span>This subject is retired. Recall does not offer a retired subject.</span><button type="button" class="btn" data-action="subject-status" data-status="active">Bring back</button></p>` : ""}
-    <div class="toolbar" role="group" aria-label="Actions"><button type="button" class="btn" data-action="subject-form" data-form-name="brief">Edit brief</button><button type="button" class="btn" data-action="subject-form" data-form-name="fields">Edit fields</button><button type="button" class="btn" data-action="subject-form" data-form-name="alias">Add alias</button>${retired ? "" : html`<button type="button" class="btn btn--danger" data-action="subject-status" data-status="retired">Retire</button>`}</div>
+    <div class="toolbar" role="group" aria-label="Actions"><button type="button" class="btn" data-action="subject-form" data-form-name="brief">Edit brief</button><button type="button" class="btn" data-action="subject-form" data-form-name="fields">Edit fields</button><button type="button" class="btn" data-action="subject-form" data-form-name="alias">Add alias</button>${retired || proposed ? "" : html`<button type="button" class="btn btn--danger" data-action="subject-status" data-status="retired">Retire</button>`}</div>
     <div data-editor aria-live="polite"></div>
     <h3 class="h3">Brief</h3>${s.brief ? html`<pre class="text" role="region" aria-label="Brief" tabindex="0">${s.brief}</pre>` : html`<p class="muted">No brief yet.</p>`}
     <h3 class="h3">Scope</h3>${segmented("subject-scope", "Scope", SCOPES.map((v) => [v, `${v[0].toUpperCase()}${v.slice(1)}`]), s.scope, "subject-scope")}
@@ -46,7 +57,7 @@ export function subjectView(subject, links, now, back) {
     <h3 class="h3">Aliases</h3>${s.aliases?.length
       ? html`<ul class="tags" aria-label="Aliases">${s.aliases.map((a) => html`<li>${a} <button type="button" class="btn btn--quiet" data-action="subject-unalias" data-alias="${a}">Remove<span class="sr"> alias ${a}</span></button></li>`)}</ul>`
       : html`<p class="muted">No aliases yet. Recall can find the subject by a name you add here.</p>`}
-    ${membersView(s)}
+    ${membersView(s, links)}
     ${linksView(links, false)}
     <dl class="facts"><div><dt>Created</dt><dd>${formatTime(s.created_at)} (${ago(s.created_at, now)})</dd></div><div><dt>Changed</dt><dd>${formatTime(s.updated_at)} (${ago(s.updated_at, now)})</dd></div><div><dt>Card memory</dt><dd><a class="mono" href="${memoryLink(s.id)}">${s.id}</a></dd></div></dl>
   </article>`;
@@ -121,6 +132,17 @@ export function mountSubjectDrawer(root, ctx, { back, changed, title, above, mem
     return true;
   }
 
+  /** POST /subject/accept or /subject/dismiss for the open proposal. A failure shows in the editor slot, and the drawer reloads after a success. */
+  async function decide(path, message) {
+    const slug = state.subject.slug;
+    const done = await attempt(editor(), () => ctx.request(path, { method: "POST", body: { slug } }));
+    if (!done) return false;
+    dispatchEvent(new Event("anymem:changed"));
+    changed();
+    await load(message);
+    return true;
+  }
+
   onSubmit(root, {
     "subject-brief": (form) => update({ brief: formValues(form).brief }),
     "subject-fields": (form) => {
@@ -148,7 +170,7 @@ export function mountSubjectDrawer(root, ctx, { back, changed, title, above, mem
   addEventListener("keydown", (e) => e.key === "Escape" && state.slug && root.isConnected && !above() && !document.querySelector("dialog[open], :popover-open") && (location.hash = back()));
   panel.addEventListener("click", (e) => {
     const tr = e.target.closest("tr[data-id]");
-    if (tr && !e.target.closest("a")) member(tr.dataset.id); // the title link keeps its own click, so a new tab still works
+    if (tr && !e.target.closest("a, button")) member(tr.dataset.id); // the title link keeps its own click, so a new tab still works
   });
   onAction(root, {
     "subject-close": () => (location.hash = back()),
@@ -159,6 +181,16 @@ export function mountSubjectDrawer(root, ctx, { back, changed, title, above, mem
       slot.querySelector("textarea, input")?.focus();
     },
     "subject-cancel": () => panel.querySelector("[data-editor]").replaceChildren(),
+    "subject-accept": () => decide("/subject/accept", "Accepted. Recall can offer this subject now."),
+    "subject-dismiss": () => decide("/subject/dismiss", "Dismissed. anymem will not propose this subject again."), // no undo here, the slug stays taken
+    // A link the system made is refused for good, so the Worker records it and never makes it again.
+    async "subject-unlink"(el) {
+      const body = { source_id: el.dataset.other, target_id: state.subject.id, type: "about" };
+      if (!(await attempt(editor(), () => ctx.request("/unlink", { method: "POST", body })))) return;
+      dispatchEvent(new Event("anymem:changed"));
+      changed();
+      await load("Noted. anymem will not make that link again.");
+    },
     "subject-unalias": (el) => update({ aliases: state.subject.aliases.filter((a) => a !== el.dataset.alias) }),
     async "subject-status"(el) {
       const id = state.subject.id;

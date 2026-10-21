@@ -66,6 +66,9 @@ test("the sidebar counts are quiet when there is nothing to say and say it in wo
   assert.deepEqual(countFor("people", { nav }), { text: "2", label: "2 changes waiting for you", alert: true });
   assert.deepEqual(countFor("health", { nav }), { text: "1", label: "1 check needs attention", alert: true });
   assert.equal(countFor("health", { nav: { ...nav, attention: 3 } }).label, "3 checks need attention");
+  assert.equal(countFor("subjects", { nav }), null, "no proposal, no number");
+  assert.deepEqual(countFor("subjects", { nav: { ...nav, subjects_proposed: 1 } }), { text: "1", label: "1 subject waiting for you", alert: true });
+  assert.equal(countFor("subjects", { nav: { ...nav, subjects_proposed: 12 } }).label, "12 subjects waiting for you");
   assert.equal(countFor("memories", null), null);
   assert.equal(countFor("capsule", { nav: { ...nav, capsule_chars: null } }), null);
   assert.equal(countFor("capsule", { nav: { ...nav, capsule_cap: undefined } }), null, "no cap from the Worker, no figure");

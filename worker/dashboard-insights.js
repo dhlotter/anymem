@@ -77,7 +77,7 @@ export async function home(c) {
   const w0 = at - WEEK_MS;
   const w1 = at - 2 * WEEK_MS;
   const base = await (await stats(c)).json();
-  const [live, added, recalled, calls, closed, trash, pending, profile, nightly, keys, activity] = await env.DB.batch([
+  const [live, added, recalled, calls, closed, trash, pending, profile, nightly, keys, activity, proposed] = await env.DB.batch([
     env.DB.prepare(`SELECT COUNT(*) AS n FROM memories WHERE ${LIVE}`),
     env.DB.prepare("SELECT COALESCE(SUM(created_at >= ?), 0) AS week, COALESCE(SUM(created_at < ?), 0) AS prev FROM memories WHERE deleted_at IS NULL AND created_at >= ?").bind(w0, w0, w1),
     env.DB.prepare("SELECT COUNT(*) AS n FROM memories WHERE deleted_at IS NULL AND last_recalled_at >= ?").bind(w0),
@@ -89,6 +89,8 @@ export async function home(c) {
     env.DB.prepare("SELECT started_at, finished_at, ok, summary FROM runs WHERE job = 'nightly' ORDER BY id DESC LIMIT 1"),
     env.DB.prepare("SELECT COUNT(*) AS n FROM memory_keys WHERE vector_id IS NOT NULL"),
     env.DB.prepare(`SELECT COUNT(*) AS n FROM memory_versions WHERE reason IN (${marks(SYSTEM_REASONS)}) AND created_at >= ?`).bind(...SYSTEM_REASONS, w0),
+    // The subjects the system proposed and nobody has answered. The card is joined so a card in the trash does not count.
+    env.DB.prepare("SELECT COUNT(*) AS n FROM subjects s JOIN memories m ON m.id = s.id WHERE s.status = 'proposed' AND m.deleted_at IS NULL"),
   ]);
   let vectorCount = null;
   try {
@@ -133,6 +135,7 @@ export async function home(c) {
       live: live.results[0].n,
       trash: trash.results[0].n,
       pending: pending.results[0].n,
+      subjects_proposed: proposed.results[0].n,
       activity_week: activity.results[0].n,
       capsule_chars: capsule?.chars ?? null,
       capsule_cap: CAP_CHARS,

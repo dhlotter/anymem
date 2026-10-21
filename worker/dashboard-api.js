@@ -12,8 +12,10 @@ const tally = (rows, key) => Object.fromEntries(rows.map((r) => [r[key] ?? "", r
 /** A pending memory the People screen shows: a profile or person note, or one tagged profile-proposal. The list and the home count both use it. */
 export const isProposal = (e) => e.origin === "profile" || e.origin === "person" || e.tags.includes("profile-proposal");
 const PROPOSAL_SQL = "(origin IN ('profile', 'person') OR id IN (SELECT memory_id FROM memory_tags WHERE tag = 'profile-proposal'))";
+/** The card of a subject. A proposed subject has a pending card, and it waits on Home and the Subjects badge, never in the profile changes. */
+export const NOT_A_CARD_SQL = "id NOT IN (SELECT memory_id FROM memory_tags WHERE tag = 'subject')";
 /** Every change waiting for a decision. The Home badge and the People count both read this, so they always agree. */
-export const PENDING_PROPOSALS_SQL = `deleted_at IS NULL AND valid_until IS NULL AND status = 'pending' AND ${PROPOSAL_SQL}`;
+export const PENDING_PROPOSALS_SQL = `deleted_at IS NULL AND valid_until IS NULL AND status = 'pending' AND ${PROPOSAL_SQL} AND ${NOT_A_CARD_SQL}`;
 
 /** GET /ui/api/overview. Everything /stats reports (so later additions show up), plus the breakdowns the Health screen needs. */
 export async function overview(c) {
@@ -23,7 +25,7 @@ export async function overview(c) {
     env.DB.prepare(`SELECT project AS k, COUNT(*) AS n FROM memories WHERE ${LIVE} GROUP BY project`),
     env.DB.prepare(`SELECT kind AS k, COUNT(*) AS n FROM memories WHERE ${LIVE} GROUP BY kind`),
     env.DB.prepare(`SELECT type AS k, COUNT(*) AS n FROM memories WHERE ${LIVE} GROUP BY type`),
-    env.DB.prepare("SELECT COUNT(*) AS n FROM memories WHERE deleted_at IS NULL AND valid_until IS NULL AND status = 'pending'"),
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM memories WHERE deleted_at IS NULL AND valid_until IS NULL AND status = 'pending' AND ${NOT_A_CARD_SQL}`),
     env.DB.prepare("SELECT COUNT(*) AS n FROM memories WHERE deleted_at IS NOT NULL AND deleted_at >= ?").bind(now() - 14 * DAY_MS),
   ]);
   let vectors = null;
@@ -62,7 +64,7 @@ export async function people({ env, now, memoryIds }) {
     env.DB.prepare(`SELECT COUNT(*) AS n FROM memories WHERE ${PENDING_PROPOSALS_SQL}`).first(),
   ]);
   const found = new Map();
-  for (const list of [pendingProfile, pendingPerson, pendingTagged]) for (const e of list.entries) if (isProposal(e)) found.set(e.id, e);
+  for (const list of [pendingProfile, pendingPerson, pendingTagged]) for (const e of list.entries) if (isProposal(e) && !e.tags.includes("subject")) found.set(e.id, e);
   const proposals = [...found.values()].sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? 1 : -1)).slice(0, PEOPLE_PAGE);
   const settled = (list) => list.entries.filter((e) => e.status !== "pending"); // a pending change is shown under pending only
   const out = { profile: settled(profile), people: settled(persons), pending: proposals };
