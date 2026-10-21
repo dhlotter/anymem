@@ -305,7 +305,7 @@ test("accept makes the subject and its card active, keeps the evidence, clears t
   const { app, memory, subject } = await proposed();
   const res = await post(app, "/subject/accept", { slug: "pip" });
   assert.equal(res.status, 200, JSON.stringify(res.json));
-  assert.deepEqual(Object.keys(res.json.subject).sort(), ["aliases", "brief", "fields", "id", "kind", "member_count", "members", "name", "scope", "slug", "status", "updated_at"]);
+  assert.deepEqual(Object.keys(res.json.subject).sort(), ["aliases", "brief", "built_at", "fields", "id", "kind", "member_count", "members", "name", "scope", "slug", "stale_reason", "status", "updated_at"]);
   assert.deepEqual([res.json.subject.status, res.json.subject.member_count, res.json.subject.brief, res.json.subject.members[0].id], ["active", 1, "", memory]);
   assert.equal((await cardOf(app, subject.id)).status, "active");
   assert.deepEqual((await linksTo(app, subject.id)).map((l) => [l.source_id, l.made_by]), [[memory, "system"]]);
