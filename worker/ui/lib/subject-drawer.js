@@ -4,9 +4,9 @@
 import { badge, icon, memoryLink, segmented } from "./components.js";
 import { linksView, madeBy, mountPanel } from "./drawer.js";
 import { attempt, formValues, notify, onAction, onChange, onSubmit } from "./dom.js";
-import { ago, count, formatTime, titleOf } from "./format.js";
+import { ago, count, formatDate, formatTime, titleOf } from "./format.js";
 import { html } from "./html.js";
-import { FIELD_KEYS, fieldLabel, SCOPES } from "./subjects.js";
+import { FIELD_KEYS, SCOPES, briefPinned, fieldLabel, staleWords } from "./subjects.js";
 
 const STATUS_NOTE = { proposed: "warn", stale: "warn", retired: "muted" };
 
@@ -35,10 +35,17 @@ const membersView = (s, links) => {
     : html`<p class="muted">No memory is about this subject yet. Open a memory, choose Link, and link it to this card with the type about.</p>`}`;
 };
 
+/** What the card says about where its brief came from: when it was built, the reason when it is stale, and that anymem wrote it unless a person did. */
+const briefNote = (s) => {
+  const pinned = briefPinned(s.fields);
+  const stale = s.status === "stale" && s.stale_reason ? html`<p class="notice" role="status">${icon("info")}<span>This brief is out of date, because ${staleWords(s.stale_reason)}.</span></p>` : "";
+  return html`${s.built_at ? html`<p class="muted small">Brief built ${formatDate(s.built_at)}.</p>` : ""}${s.built_at && !pinned ? html`<p class="muted small">Written by anymem from the memories below. Each line cites them.</p>` : ""}${pinned ? html`<p class="muted small">Written by hand. anymem will not rebuild it.</p>` : ""}${stale}`;
+};
+
 /** The whole panel for one subject. subject is the GET /subject reply, links the card memory's links or null. */
 export function subjectView(subject, links, now, back) {
   const s = { members: [], member_count: subject.members?.length ?? 0, ...subject, now };
-  const fields = Object.entries(s.fields ?? {});
+  const fields = Object.entries(s.fields ?? {}).filter(([k]) => k !== "brief_pinned"); // the pin has its own line under the brief
   const retired = s.status === "retired";
   const proposed = s.status === "proposed";
   return html`<article class="detail" aria-labelledby="subject-h">
@@ -48,7 +55,7 @@ export function subjectView(subject, links, now, back) {
     ${retired ? html`<p class="notice" role="status">${icon("info")}<span>This subject is retired. Recall does not offer a retired subject.</span><button type="button" class="btn" data-action="subject-status" data-status="active">Bring back</button></p>` : ""}
     <div class="toolbar" role="group" aria-label="Actions"><button type="button" class="btn" data-action="subject-form" data-form-name="brief">Edit brief</button><button type="button" class="btn" data-action="subject-form" data-form-name="fields">Edit fields</button><button type="button" class="btn" data-action="subject-form" data-form-name="alias">Add alias</button>${retired || proposed ? "" : html`<button type="button" class="btn btn--danger" data-action="subject-status" data-status="retired">Retire</button>`}</div>
     <div data-editor aria-live="polite"></div>
-    <h3 class="h3">Brief</h3>${s.brief ? html`<pre class="text" role="region" aria-label="Brief" tabindex="0">${s.brief}</pre>` : html`<p class="muted">No brief yet.</p>`}
+    <h3 class="h3">Brief</h3>${s.brief ? html`<pre class="text" role="region" aria-label="Brief" tabindex="0">${s.brief}</pre>` : html`<p class="muted">No brief yet.</p>`}${briefNote(s)}
     <h3 class="h3">Scope</h3>${segmented("subject-scope", "Scope", SCOPES.map((v) => [v, `${v[0].toUpperCase()}${v.slice(1)}`]), s.scope, "subject-scope")}
     <p class="muted small">${s.scope === "private" ? "A device that may not see private subjects never sees this subject, its card, or a memory that is only about private subjects." : "Every device can see this subject."}</p>
     <h3 class="h3">Fields</h3>${fields.length
@@ -80,7 +87,7 @@ export const aliasForm = () => html`<form class="stack row-form" data-form="subj
  */
 export function mountSubjectDrawer(root, ctx, { back, changed, title, above, member, closed = () => {} }) {
   const { scrim, panel, msg, body, shield } = mountPanel(root, "Subject", "subject-close");
-  const state = { slug: "", subject: null };
+  const state = { slug: "", subject: null, deciding: false };
   const editor = () => panel.querySelector("[data-editor]") ?? msg;
   const clearMsg = () => (msg.replaceChildren(), (msg.className = ""), msg.removeAttribute("role")); // an old failure leaves no empty red box behind
 
@@ -134,13 +141,22 @@ export function mountSubjectDrawer(root, ctx, { back, changed, title, above, mem
 
   /** POST /subject/accept or /subject/dismiss for the open proposal. A failure shows in the editor slot, and the drawer reloads after a success. */
   async function decide(path, message) {
+    if (state.deciding) return false; // a double click, or Dismiss while Accept is on its way
     const slug = state.subject.slug;
-    const done = await attempt(editor(), () => ctx.request(path, { method: "POST", body: { slug } }));
-    if (!done) return false;
-    dispatchEvent(new Event("anymem:changed"));
-    changed();
-    await load(message);
-    return true;
+    const buttons = [...panel.querySelectorAll('[data-action="subject-accept"], [data-action="subject-dismiss"]')];
+    state.deciding = true;
+    for (const b of buttons) b.disabled = true;
+    try {
+      const done = await attempt(editor(), () => ctx.request(path, { method: "POST", body: { slug } }));
+      if (!done) return false;
+      dispatchEvent(new Event("anymem:changed"));
+      changed();
+      await load(message); // the card is drawn again, so the buttons are new ones
+      return true;
+    } finally {
+      state.deciding = false;
+      for (const b of buttons) b.disabled = false;
+    }
   }
 
   onSubmit(root, {

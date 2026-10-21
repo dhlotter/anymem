@@ -6,10 +6,14 @@
 // the memory name. Then the vectors check that the group is really about one thing: the mean cosine of the members must
 // be 0.55 or more. A group that cannot be checked because the budget is gone is dropped and tried again tomorrow, it is
 // never proposed unchecked. A memory with an about link to any subject (a private one too) is not a candidate, so a
-// proposal never pulls a private subject's members into a shared one. At most three proposals a night.
+// proposal never pulls a private subject's members into a shared one. At most three proposals a night, and none while the
+// cap of waiting proposals is reached.
+//
+// A group that fails the cohesion check is remembered for a week (the meta table, one small JSON value), so the same loose
+// groups do not use the night's few checks again and again while a good smaller group is never looked at.
 import { autoOn } from "../subjects/auto.js";
 import { LIVE } from "../system.js";
-import { createProposed } from "../subjects/propose.js";
+import { MAX_PROPOSED, createProposed } from "../subjects/propose.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const WINDOW_MS = 90 * DAY_MS;
@@ -19,7 +23,13 @@ export const MIN_COHESION = 0.55;
 /** Vectorize takes at most 20 ids in one getByIds call, so a group is judged on its 20 newest members. */
 export const SAMPLE = 20;
 // Groups looked at in one night. Each costs a Vectorize call, so a night with many weak groups does not spend its budget on them.
-const MAX_CHECKS = 6;
+export const MAX_CHECKS = 6;
+// What the step remembers between nights. A group dropped for low cohesion is skipped for 7 days. Entries older than 14 days
+// are forgotten and at most 200 are kept, so the value stays small.
+export const MEMO_KEY = "cluster_memo";
+export const DROP_DAYS = 7;
+const MEMO_KEEP_DAYS = 14;
+const MEMO_MAX = 200;
 const FETCH = 3000;
 const MIN_TOKEN = 4;
 const MAX_DROPPED = 50;
@@ -48,7 +58,7 @@ export const STOP = new Set(
    add added adding fix fixed fixes note notes memory memories rule rules user users prefer prefers preference preferences feature
    bug bugs test tests testing config setup error errors issue issues decision decisions pattern patterns lesson lessons learned
    important remember reminder todo summary context working work default correct correction avoid check build builds deploy code
-   file files data thing things project projects session sessions system team home idea plan plans guideline workflow approach
+   feedback reference file files data thing things project projects session sessions system team home idea plan plans guideline workflow approach
    convention update updated updates change changes refactor review reviews task tasks item items info misc general other temp
    tmp draft drafts stuff topic topics area areas capture captured explicit fact facts`.split(/\s+/),
 );
@@ -98,9 +108,40 @@ async function readCandidates(db, now) {
   return { memories, tags };
 }
 
-/** Every slug and alias a subject has, in any status. A retired subject keeps its slug on purpose, it is what stops a proposal coming back. */
-async function takenNames(db) {
-  const { results } = await db.prepare("SELECT slug, aliases FROM subjects").all();
+/**
+ * What the step knows before it picks groups, in one batch (one subrequest): every slug and alias a subject has, the memo of
+ * dropped and checked groups, and how many proposals already wait for a click.
+ */
+async function readState(db) {
+  const [subjects, memo, waiting] = await db.batch([
+    db.prepare("SELECT slug, aliases FROM subjects"),
+    db.prepare("SELECT value FROM meta WHERE key = ?").bind(MEMO_KEY),
+    db.prepare("SELECT COUNT(*) AS n FROM subjects WHERE status = 'proposed'"),
+  ]);
+  return { taken: takenNames(subjects.results), memo: parseMemo(memo.results?.[0]?.value), waiting: waiting.results?.[0]?.n ?? 0 };
+}
+
+/** The memo is {slug: {k: day last checked, d: day dropped for low cohesion}}, days counted since 1970. Anything unreadable is no memo. */
+function parseMemo(raw) {
+  try {
+    const value = JSON.parse(raw ?? "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+const dayOf = (ms) => Math.floor(ms / DAY_MS);
+
+/** Forget old entries and keep the 200 most recently checked. */
+function pruneMemo(memo, today) {
+  const fresh = Object.entries(memo).filter(([, e]) => e && typeof e === "object" && today - Math.max(e.k ?? 0, e.d ?? 0) <= MEMO_KEEP_DAYS);
+  fresh.sort((a, b) => (b[1].k ?? 0) - (a[1].k ?? 0));
+  return Object.fromEntries(fresh.slice(0, MEMO_MAX));
+}
+
+/** Every slug and alias a subject has. A retired subject keeps its slug on purpose, it is what stops a proposal coming back. */
+function takenNames(results) {
   const taken = new Set();
   for (const r of results) {
     taken.add(r.slug);
@@ -117,6 +158,14 @@ async function takenNames(db) {
     }
   }
   return taken;
+}
+
+/** True when a subject already carries the group's name, whole or as a whole dash separated word of its slug (toyota-corolla holds corolla). */
+function isTaken(taken, slug) {
+  if (taken.has(slug)) return true;
+  const wrapped = `-${slug}-`;
+  for (const t of taken) if (`-${t}-`.includes(wrapped)) return true;
+  return false;
 }
 
 /** Groups of memories by shared project, plain tag and leading name word. A group with one slug can have several signals. */
@@ -178,20 +227,36 @@ export async function planClusters(env, { now, budget, apply, propose }) {
   const groups = groupUp(found);
   out.groups = groups.length;
   if (!groups.length) return out;
-  const taken = await takenNames(env.DB);
+  const { taken, memo, waiting } = await readState(env.DB);
+  const today = dayOf(now());
+  // Biggest first (groupUp's order). A tie goes to the group checked longest ago, a group never checked first, so a run of
+  // equal groups takes turns instead of the same ones using every check.
+  const checkedDay = (g) => memo[g.slug]?.k ?? -Infinity;
+  groups.sort((a, b) => b.members.length - a.members.length || checkedDay(a) - checkedDay(b) || (a.slug < b.slug ? -1 : 1));
+  // Proposals waiting for a click are capped (the same cap createProposed enforces). Stop early so a full list costs no vector calls.
+  let room = Math.max(0, MAX_PROPOSED - waiting);
+  const memoNext = { ...memo };
+  let memoChanged = false;
+  const note = (slug, patch) => {
+    memoNext[slug] = { ...memoNext[slug], ...patch };
+    memoChanged = true;
+  };
   const drop = (g, reason, extra = {}) => {
     if (reason === "skipped_budget") out.skipped_budget++;
     if (out.dropped.length < MAX_DROPPED) out.dropped.push({ name: g.name, slug: g.slug, kind: g.kind, size: g.members.length, reason, ...extra });
   };
 
   for (const g of groups) {
+    const limit = Math.min(MAX_PROPOSALS, room);
     if (STOP.has(g.slug)) drop(g, "generic");
-    else if (taken.has(g.slug)) drop(g, "exists");
-    else if (out.candidates.length >= MAX_PROPOSALS) drop(g, "over_cap");
+    else if (isTaken(taken, g.slug)) drop(g, "exists");
+    else if (today - (memo[g.slug]?.d ?? -Infinity) < DROP_DAYS) drop(g, "recently_dropped");
+    else if (out.candidates.length >= limit) drop(g, limit < MAX_PROPOSALS ? "waiting_full" : "over_cap");
     else if (out.checked >= MAX_CHECKS) drop(g, "check_limit");
     else if (!budget.has(CHECK_COST + (apply ? PROPOSE_COST : 0))) drop(g, "skipped_budget");
     else {
       out.checked++;
+      if (apply) note(g.slug, { k: today });
       const sample = g.members.slice(0, SAMPLE);
       let vectors;
       try {
@@ -209,6 +274,7 @@ export async function planClusters(env, { now, budget, apply, propose }) {
       const mean = round2(cohesion(evidence.map((m) => vectors.get(m.id))));
       if (mean < MIN_COHESION) {
         drop(g, "low_cohesion", { cohesion: mean });
+        if (apply) note(g.slug, { d: today });
         continue;
       }
       const candidate = { name: g.name, slug: g.slug, kind: g.kind, source: g.source, size: g.members.length, cohesion: mean, evidence: evidence.map((m) => ({ id: m.id, name: m.name })) };
@@ -221,15 +287,28 @@ export async function planClusters(env, { now, budget, apply, propose }) {
         const made = await (propose ?? createProposed)(env, { name: g.name, kind: g.kind, evidence: candidate.evidence.map((e) => ({ id: e.id, confidence: mean })), now, step: "cluster" });
         if (!made?.ok) {
           drop(g, made?.reason ?? "refused", { cohesion: mean });
+          // createProposed says the list is full: the rest of the night's groups wait without a vector call
+          if (made?.reason === "too_many") room = 0;
           continue;
         }
         out.candidates.push({ ...candidate, slug: made.slug ?? g.slug, id: made.id });
         out.proposed.push(made.slug ?? g.slug);
+        // a proposed group exists now, the exists rule covers it, no need to remember it
+        delete memoNext[g.slug];
+        memoChanged = true;
       } catch {
         // createProposed does not throw. This is the module failing to load, or a stand in that does.
         out.failed++;
         drop(g, "failed", { cohesion: mean });
       }
+    }
+  }
+  // The memo is advice, so it is written only when a subrequest is left and a failed write costs nothing but a repeated check.
+  if (apply && memoChanged && budget.has(1)) {
+    try {
+      await env.DB.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(MEMO_KEY, JSON.stringify(pruneMemo(memoNext, today))).run();
+    } catch {
+      // checked again tomorrow
     }
   }
   return out;

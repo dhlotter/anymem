@@ -46,3 +46,32 @@ export function subjectsOf(links, subjects) {
     return s && !seen.has(s.id) && seen.add(s.id) ? [s] : [];
   });
 }
+
+/** A brief written by hand. The Worker sets brief_pinned when a person saves a brief, and the nightly step then leaves it alone. Same reading as the Worker's isPinned. */
+export function briefPinned(fields) {
+  const f = fields?.brief_pinned;
+  if (f === undefined || f === null) return false;
+  const v = typeof f === "object" ? f.value : f;
+  return v !== undefined && v !== null && v !== false && !["", "0", "false", "no", "off"].includes(String(v).trim().toLowerCase());
+}
+
+const STALE_WORDS = {
+  bad_shape: "the model's answer was not in the shape the brief needs",
+  too_long: "the brief it wrote was too long",
+  no_citation: "a line cited no memory",
+  foreign_id: "a line cited a memory that is not about this subject",
+  trashed_member: "a line cited a memory that was trashed or replaced",
+  uncited_number: "a line had a number or a date that no cited memory says",
+  instruction: "a line read like an instruction",
+  bad_card: "the card could not hold a brief",
+};
+
+/** Why a brief is stale, in plain words. A reason the dashboard does not know is shown as it is, with the dots and underscores made spaces. */
+export function staleWords(reason) {
+  const text = String(reason ?? "").trim();
+  if (!text) return "";
+  if (STALE_WORDS[text]) return STALE_WORDS[text];
+  const fail = /^model\.fail(?:\.(\d+))?$/.exec(text);
+  if (fail) return fail[1] ? `the model did not answer ${fail[1]} nights in a row` : "the model did not answer";
+  return text.replace(/[._]+/g, " ");
+}
