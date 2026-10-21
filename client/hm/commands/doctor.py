@@ -259,7 +259,7 @@ def _backup_check(s: config.Settings, today=None) -> Check:
 
 
 def _auto_text(s: config.Settings) -> str:
-    """Whether the system acts on subjects by itself, from the two switches GET /stats reports. Empty when the Worker does not say
+    """Whether the system acts on subjects by itself, and writes briefs, from the three switches GET /stats reports. Empty when the Worker does not say
     (an older Worker, or a stats reply this client cannot read): a line that guesses is worse than a line that is shorter."""
     try:
         stats = api.request("GET", "/stats", timeout=TIMEOUT, settings=s)
@@ -270,7 +270,11 @@ def _auto_text(s: config.Settings) -> str:
     if not stats["subjects_auto"]:
         return ", auto off"
     # Automation needs the subject layer too. With SUBJECTS off the Worker does nothing new, so say that instead of "auto on".
-    return ", auto on" if stats.get("subjects_on") is True else ", auto set but SUBJECTS is off, so it does nothing"
+    if stats.get("subjects_on") is not True:
+        return ", auto set but SUBJECTS is off, so it does nothing"
+    # Writing briefs has its own third switch. An older Worker does not report it, and then the line says nothing about briefs.
+    briefs = stats.get("subjects_briefs")
+    return ", auto on" + (", briefs on" if briefs is True else ", briefs off" if briefs is False else "")
 
 
 def _subjects_check(s: config.Settings) -> Optional[Check]:

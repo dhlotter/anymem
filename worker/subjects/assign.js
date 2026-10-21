@@ -48,6 +48,7 @@ function termsOf(row) {
  * @property {{subject_id: string, slug: string, confidence: number, how: "alias" | "vote"}[]} links best first, at most MAX_LINKS
  * @property {string[]} ambiguous slugs of subjects that tied on an alias another subject has too, and so were not linked
  * @property {string[]} ambiguous_ids the card ids of the same subjects, in the same order
+ * @property {string[]} private_ids the card ids among the links that belong to private subjects
  * @property {string | null} skipped why nothing was tried, or null
  */
 
@@ -60,7 +61,7 @@ function termsOf(row) {
  * @returns {Promise<Assignment>}
  */
 export async function assignMemory(env, { id, content, neighbours = [], origin = null, actor }) {
-  const out = { links: [], ambiguous: [], ambiguous_ids: [], skipped: null };
+  const out = { links: [], ambiguous: [], ambiguous_ids: [], private_ids: [], skipped: null };
   if (origin && NOT_ASSIGNED_ORIGINS.includes(origin)) return { ...out, skipped: "origin" };
   const text = fold(String(content ?? "").slice(0, MAX_TEXT_CHARS));
   if (!text && !neighbours.length) return { ...out, skipped: "no_text" };
@@ -131,6 +132,7 @@ export async function assignMemory(env, { id, content, neighbours = [], origin =
     .map(([sid, c]) => ({ subject_id: sid, slug: subjects.get(sid).slug, confidence: c.confidence, how: c.how }))
     .sort((a, b) => b.confidence - a.confidence || (a.slug < b.slug ? -1 : 1))
     .slice(0, MAX_LINKS);
+  out.private_ids = out.links.filter((l) => subjects.get(l.subject_id).scope === "private").map((l) => l.subject_id);
   const left = [...tied].filter((sid) => !taken.has(sid)).sort((a, b) => (subjects.get(a).slug < subjects.get(b).slug ? -1 : 1));
   out.ambiguous = left.map((sid) => subjects.get(sid).slug);
   out.ambiguous_ids = left;

@@ -17,22 +17,42 @@ export const GENERIC_NAMES = new Set(
 
 /** A name is at most this many words. A sentence is not a name. */
 export const HINT_MAX_WORDS = 5;
-// A name is letters of any script (with their marks), digits, a plain space, an apostrophe, a period, a hyphen and an ampersand.
-// Anything else is out: punctuation that makes a link, an address or a sentence ("eve@x.com", "https://x", "Dana says: ..."), and every
-// invisible character (format, line and paragraph separators), which could hide text or flip it. It must start with a letter or a digit.
-const PLAIN_NAME = /^[\p{L}\p{N}][\p{L}\p{M}\p{N} '’.&-]*$/u;
+/** A name of more than this many words that holds one of the verbs below reads as a command ("Please send the report"), not as a name. */
+export const COMMAND_MIN_WORDS = 4;
+export const COMMAND_VERBS = new Set(["send", "delete", "reveal", "ignore", "forget", "email", "run", "open", "visit", "remove", "share", "show", "tell", "print", "execute", "download", "disregard", "override", "forward", "reply", "ask", "post"]);
+const SLUG_MIN = 2;
+const SLUG_MAX = 40;
+
+// A name is Latin letters (with their marks), ASCII digits, a plain space, an apostrophe, a period, a hyphen and an ampersand. It is read
+// after NFKC, so a full width or compatibility form is the plain letter. Letters of any other script are out: a name that mixes scripts
+// ("Dаna" with a Cyrillic а) looks like another name, and a name of one other script cannot make a slug (the slug is letters and digits
+// of the Latin alphabet), so it would be refused later anyway. Anything else is out too: punctuation that makes a link, an address or a
+// sentence ("eve@x.com", "https://x", "Dana says: ..."), and every invisible character (format, line and paragraph separators), which
+// could hide text or flip it. It must start with a letter or a digit.
+const PLAIN_NAME = /^[\p{Script=Latin}0-9][\p{Script=Latin}\p{M}0-9 '’.&-]*$/u;
 const words = (name) => name.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
 
+/** A slug from a display name: lowercase letters and digits with single dashes, a leading "the" dropped. Null when nothing valid is left. */
+export function slugOf(name) {
+  const plain = name.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const bare = plain.startsWith("the-") ? plain.slice(4) : plain;
+  const slug = (bare || plain).slice(0, SLUG_MAX).replace(/-+$/, "");
+  return slug.length >= SLUG_MIN ? slug : null;
+}
+
 /**
- * The name as plain text (composed form, single plain spaces, nothing at the ends), or null when it is not plain or has more than
- * HINT_MAX_WORDS words. Only the plain space is folded, so any other kind of white space makes the name not plain.
+ * The name as plain text (NFKC form, single plain spaces, nothing at the ends), or null when it is not plain, has more than
+ * HINT_MAX_WORDS words, reads as a command, or cannot make a slug. Only the plain space is folded: any other kind of white space,
+ * checked before the fold, makes the name not plain.
  * @returns {string | null}
  */
 export function plainName(name) {
-  if (typeof name !== "string") return null;
-  const parts = name.normalize("NFC").split(" ").filter(Boolean);
+  if (typeof name !== "string" || /[^\S ]/u.test(name)) return null;
+  const parts = name.normalize("NFKC").split(" ").filter(Boolean);
   const text = parts.join(" ");
-  return parts.length <= HINT_MAX_WORDS && PLAIN_NAME.test(text) ? text : null;
+  if (parts.length > HINT_MAX_WORDS || !PLAIN_NAME.test(text) || slugOf(text) === null) return null;
+  if (parts.length >= COMMAND_MIN_WORDS && words(text).some((w) => COMMAND_VERBS.has(w))) return null;
+  return text;
 }
 
 /** True for a name made only of generic words, or only of digits. */

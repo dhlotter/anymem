@@ -75,6 +75,7 @@ export async function stats({ env, now }) {
     // The two switches of the subject layer, so `doctor` can say whether the system acts on its own. Never a secret, only on or off.
     subjects_on: env.SUBJECTS === "on",
     subjects_auto: env.SUBJECTS_AUTO === "on",
+    subjects_briefs: env.SUBJECTS_BRIEFS === "on",
     ...(await readStats(env.DB, now())),
     last_run: run ? { job: run.job, started_at: run.started_at, finished_at: run.finished_at, ok: run.ok === 1, summary: parseSummary(run.summary) } : null,
   });

@@ -11,6 +11,7 @@
 // The step walks the candidates oldest first and keeps its place in meta (merge_cursor), so a backlog continues the next
 // night. When it runs out of candidates the cursor is cleared and the next run starts again from the window start.
 import { createStore } from "../memory/store.js";
+import { CLEAR_COST, clearCiting } from "../subjects/clear.js";
 import { findNeighbours } from "../write/neighbours.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -103,6 +104,7 @@ export async function mergeDuplicates(env, { now, budget }) {
   let price = COST_PER_CANDIDATE;
   let spent = 0;
   let last = null;
+  const merged = [];
   for (const cand of results) {
     if (!budget.has(price + FIXED_COST)) break;
     last = cand;
@@ -113,6 +115,7 @@ export async function mergeDuplicates(env, { now, budget }) {
       try {
         await store.supersede(cand.id, match.id, now(), "merge");
         out.merged++;
+        merged.push(cand.id);
         if (out.examples.length < EXAMPLES) out.examples.push({ from: cand.name || cand.id.slice(0, 8), into: match.name || match.id.slice(0, 8) });
       } catch (err) {
         // Someone changed it since it was read. It is looked at again on the next sweep.
@@ -122,6 +125,8 @@ export async function mergeDuplicates(env, { now, budget }) {
     spent += budget.spent - before;
     price = Math.max(1, Math.ceil(spent / out.examined));
   }
+  // A memory that was folded into another may have fed a brief, and that brief goes with it. The briefs step checks this too, a night later.
+  if (merged.length && budget.has(CLEAR_COST + 1)) await clearCiting(env, { ids: merged, now, why: "member.gone", room: () => budget.has(CLEAR_COST + 4) }).catch(() => console.error("brief clear failed"));
   out.completed = out.examined === results.length && results.length < FETCH;
   if (out.completed) await env.DB.prepare("DELETE FROM meta WHERE key = ?").bind(CURSOR_KEY).run();
   else if (last) await env.DB.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)").bind(CURSOR_KEY, JSON.stringify([last.created_at, last.id])).run();

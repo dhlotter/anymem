@@ -6,30 +6,20 @@ import { parseMemory } from "../memory/parse.js";
 import { createStore } from "../memory/store.js";
 import { readsAsInstruction, screenExplicit } from "../write/screen.js";
 import { autoOn } from "./auto.js";
-import { cleanHint, HINT_ORIGINS, isGeneric, mentions, plainName } from "./hint.js";
+import { cleanHint, HINT_ORIGINS, isGeneric, mentions, plainName, slugOf } from "./hint.js";
 import { checkName, KINDS, PROPOSED_BRIEF } from "./store.js";
 
-export { PROPOSED_BRIEF };
+export { PROPOSED_BRIEF, slugOf };
 
 /** Proposals waiting for a click at one time. More than this and a proposal is refused, so a flood of captures cannot bury the person. The insert itself checks it. */
 export const MAX_PROPOSED = 25;
 const MAX_EVIDENCE = 50;
-const SLUG_MIN = 2;
-const SLUG_MAX = 40;
 
 /** What the audit row says for each step that proposes. */
 const STEPS = { propose: { route: "propose.subject", how: "hint" }, cluster: { route: "cluster.propose", how: "cluster" } };
 
 // The same card text as createSubjectStore, written here so this module does not reach into the store's private helpers. A test keeps the two equal.
 const cardContent = ({ slug, kind, name, brief }) => `---\nname: ${slug}\ndescription: ${kind} card for ${name}\nmetadata:\n  type: project\n---\n\n${brief}`;
-
-/** A slug from a display name: lowercase letters and digits with single dashes, a leading "the" dropped. Null when nothing valid is left. */
-export function slugOf(name) {
-  const plain = name.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  const bare = plain.startsWith("the-") ? plain.slice(4) : plain;
-  const slug = (bare || plain).slice(0, SLUG_MAX).replace(/-+$/, "");
-  return slug.length >= SLUG_MIN ? slug : null;
-}
 
 const round2 = (n) => Math.round(n * 100) / 100;
 const asClock = (now) => (typeof now === "function" ? now : () => (Number.isFinite(now) ? now : Date.now()));

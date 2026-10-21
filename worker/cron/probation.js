@@ -8,6 +8,7 @@
 // retired as never recalled and the idle rule measures from created_at.
 // The trash keeps a memory for 14 days, so every retirement can be undone.
 import { createStore } from "../memory/store.js";
+import { CLEAR_COST, clearCiting } from "../subjects/clear.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const NEVER_RECALLED_MS = 60 * DAY_MS;
@@ -31,6 +32,7 @@ export async function runProbation(env, { now, budget }) {
   out.probation_ended = ended.meta.changes;
   if (ended.meta.changes === END_BATCH) out.more = true;
 
+  const retired = [];
   const rules = [
     ["never_recalled", "retired_never_recalled", `${ELIGIBLE} AND recall_count = 0 AND last_recalled_at IS NULL AND created_at <= ?`, at - NEVER_RECALLED_MS, "retire_never_recalled"],
     ["idle_project", "retired_idle_project", `${ELIGIBLE} AND type = 'project' AND COALESCE(last_recalled_at, created_at) <= ?`, at - IDLE_PROJECT_MS, "retire_idle_project"],
@@ -48,10 +50,13 @@ export async function runProbation(env, { now, budget }) {
         break;
       }
       await store.softDelete(row.id, reason);
+      retired.push(row.id);
       out[counter]++;
       if (out.examples[label].length < EXAMPLES) out.examples[label].push(row.name || row.id.slice(0, 8));
     }
     if (results.length === room) out.more = true;
   }
+  // A memory that went to the trash may have fed a brief, and that brief goes with it. The briefs step checks this too, a night later.
+  if (retired.length && budget.has(CLEAR_COST + 1)) await clearCiting(env, { ids: retired, now, why: "member.gone", room: () => budget.has(CLEAR_COST + 4) }).catch(() => console.error("brief clear failed"));
   return out;
 }

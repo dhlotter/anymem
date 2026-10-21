@@ -28,6 +28,12 @@ const HIDDEN_SQL = `SELECT j.value AS id FROM json_each(?) j WHERE ${HIDDEN_FOR(
  */
 export const hiddenWhere = (col) => `(${HIDDEN_FOR(col)})`;
 
+/** True when the actor may see private subjects: anyone but a device, and a device with allow_private on. Costs one query for a device. */
+export async function seesPrivate(db, actor) {
+  if (!mayBeRestricted(actor)) return true;
+  return Boolean(await db.prepare(`SELECT 1 AS n WHERE ${SEES_PRIVATE_SQL}`).bind(actor.id).first());
+}
+
 /**
  * The ids the actor may not see.
  * @param {any} db
@@ -51,3 +57,16 @@ export async function visibleOnly(db, rows, actor, idOf = (r) => r.id) {
   const hidden = await hiddenIds(db, rows.map(idOf), actor);
   return hidden.size ? rows.filter((r) => !hidden.has(idOf(r))) : rows;
 }
+
+/**
+ * SQL that deletes the about links of one proposed card whose source memory has an about link to a private subject. Bind the card id.
+ * A proposal is invisible to a closed device, so a memory that got a private link after it was proposed is hidden. Once the card is
+ * accepted (or brought back) it is a shared subject, and the link would make that memory visible. So the link goes first.
+ */
+export const DROP_PRIVATE_EVIDENCE_SQL = `DELETE FROM links WHERE target_id = ? AND link_type = 'about'
+  AND source_id IN (SELECT x.source_id FROM links x JOIN subjects p ON p.id = x.target_id WHERE x.link_type = 'about' AND p.scope = 'private')`;
+
+/** SQL that deletes the links the system made from the members of one subject (bind its id twice) to subjects that are not private. For a subject that has just become private. */
+export const SHED_MEMBERS_SQL = `DELETE FROM links WHERE link_type = 'about' AND made_by = 'system' AND target_id <> ?
+  AND source_id IN (SELECT source_id FROM links WHERE target_id = ? AND link_type = 'about')
+  AND target_id IN (SELECT id FROM subjects WHERE scope <> 'private')`;

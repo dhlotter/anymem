@@ -97,6 +97,14 @@ function decodeCursor(cursor, sort) {
   throw badRequest("cursor is not valid.", "bad_cursor");
 }
 
+/**
+ * Delete the links the system made from a memory to subjects that are not private (a shared subject, or a proposal), once the memory
+ * has a link to a private subject. Bind the memory id, the link type ('about' is the only one it does anything for) and the memory id.
+ */
+export const SHED_SHARED_SQL = `DELETE FROM links WHERE source_id = ? AND ? = 'about' AND link_type = 'about' AND made_by = 'system'
+  AND target_id IN (SELECT id FROM subjects WHERE scope <> 'private')
+  AND EXISTS (SELECT 1 FROM links x JOIN subjects p ON p.id = x.target_id WHERE x.source_id = ? AND x.link_type = 'about' AND p.scope = 'private')`;
+
 const sameSet = (a, b) => a.length === b.length && a.every((t) => b.includes(t));
 
 /**
@@ -371,7 +379,14 @@ export function createStore(db, now = Date.now) {
       if (sourceId === targetId) throw badRequest("A memory cannot link to itself.");
       const { results } = await db.prepare("SELECT id FROM memories WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?))").bind(JSON.stringify([sourceId, targetId])).all();
       if (results.length < 2) throw notFound("One of the two memories does not exist.");
-      const res = await db.prepare("INSERT OR IGNORE INTO links (source_id, target_id, link_type, created_at, made_by, confidence) VALUES (?, ?, ?, ?, ?, ?)").bind(sourceId, targetId, type.trim().toLowerCase(), now(), madeBy, confidence).run();
+      const t = type.trim().toLowerCase();
+      // A memory that belongs to a private subject stays private only while it has no shared subject. The private rule reads a link to a
+      // shared subject as "this memory is about something everyone may see", so the links the system made to shared subjects go in the
+      // same batch as the private one. A link a person made is theirs and stays (see ARCHITECTURE, the private rule).
+      const [res] = await db.batch([
+        db.prepare("INSERT OR IGNORE INTO links (source_id, target_id, link_type, created_at, made_by, confidence) VALUES (?, ?, ?, ?, ?, ?)").bind(sourceId, targetId, t, now(), madeBy, confidence),
+        db.prepare(SHED_SHARED_SQL).bind(sourceId, t, sourceId),
+      ]);
       return { created: res.meta.changes > 0 };
     },
 
