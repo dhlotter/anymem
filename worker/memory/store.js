@@ -98,11 +98,14 @@ function decodeCursor(cursor, sort) {
 }
 
 /**
- * Delete the links the system made from a memory to subjects that are not private (a shared subject, or a proposal), once the memory
- * has a link to a private subject. Bind the memory id, the link type ('about' is the only one it does anything for) and the memory id.
+ * Delete the links the system made from a memory to subjects that are not private (a shared subject, or a proposal), when the memory
+ * has just been linked to a private subject. Bind the memory id, the link type ('about' is the only one it does anything for), the
+ * subject the new link points at, and the memory id. It does nothing unless that subject is private, so a link between two memories, or
+ * a link to a shared subject, can never delete anything, whoever makes it.
  */
 export const SHED_SHARED_SQL = `DELETE FROM links WHERE source_id = ? AND ? = 'about' AND link_type = 'about' AND made_by = 'system'
   AND target_id IN (SELECT id FROM subjects WHERE scope <> 'private')
+  AND EXISTS (SELECT 1 FROM subjects WHERE id = ? AND scope = 'private')
   AND EXISTS (SELECT 1 FROM links x JOIN subjects p ON p.id = x.target_id WHERE x.source_id = ? AND x.link_type = 'about' AND p.scope = 'private')`;
 
 const sameSet = (a, b) => a.length === b.length && a.every((t) => b.includes(t));
@@ -383,9 +386,13 @@ export function createStore(db, now = Date.now) {
       // A memory that belongs to a private subject stays private only while it has no shared subject. The private rule reads a link to a
       // shared subject as "this memory is about something everyone may see", so the links the system made to shared subjects go in the
       // same batch as the private one. A link a person made is theirs and stays (see ARCHITECTURE, the private rule).
+      // A person who makes a link the system already made takes it over: it is theirs from now on, with no confidence, so the system
+      // never deletes it. created stays false, because the link existed.
+      const own = madeBy === "user" ? [db.prepare("UPDATE links SET made_by = 'user', confidence = NULL WHERE source_id = ? AND target_id = ? AND link_type = ? AND made_by = 'system'").bind(sourceId, targetId, t)] : [];
       const [res] = await db.batch([
         db.prepare("INSERT OR IGNORE INTO links (source_id, target_id, link_type, created_at, made_by, confidence) VALUES (?, ?, ?, ?, ?, ?)").bind(sourceId, targetId, t, now(), madeBy, confidence),
-        db.prepare(SHED_SHARED_SQL).bind(sourceId, t, sourceId),
+        ...own,
+        db.prepare(SHED_SHARED_SQL).bind(sourceId, t, targetId, sourceId),
       ]);
       return { created: res.meta.changes > 0 };
     },

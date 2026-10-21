@@ -194,10 +194,11 @@ async function run({ env, ctx, now, actorId, actorKind, memoryIds }, w, counters
   }
   if (decision.action === "replace") {
     try {
+      // The replaced memory may no longer feed a brief, so the briefs that cite it are blanked BEFORE it is replaced. If they cannot be
+      // blanked the old memory is not replaced (both are kept), so a card never holds the text of a memory that is no longer live.
+      await clearCiting(env, { ids: [decision.oldId], now, ctx, why: "member.gone", strict: true });
       await store.supersede(decision.oldId, entry.id, now());
       memoryIds.push(decision.oldId);
-      // The replaced memory may no longer feed a brief, so the briefs that cite it go now. A failure here is the nightly step's to catch.
-      await clearCiting(env, { ids: [decision.oldId], now, ctx, why: "member.gone" }).catch(() => console.error("brief clear failed"));
       counters.bump("conflicts.replaced");
       body.replaced = { id: decision.oldId, reason: "contradiction" };
     } catch {

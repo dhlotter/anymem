@@ -506,9 +506,11 @@ def undash(text: str) -> str:
 
 SUBJECT_MAX_WORDS = 5
 SUBJECT_PUNCT = " '\u2019.&-"
-# A name of more than 3 words that holds one of these verbs reads as a command, not as a name. The same list as the Worker's.
-SUBJECT_COMMAND_MIN_WORDS = 4
-SUBJECT_COMMAND_VERBS = frozenset("send delete reveal ignore forget email run open visit remove share show tell print execute download disregard override forward reply ask post".split())
+# A name of 3 words or more that starts with one of these verbs reads as a command ("Delete All Memories"), not as a name. A name never
+# holds one of the banned words, wherever it stands. The same lists as the Worker's.
+SUBJECT_COMMAND_MIN_WORDS = 3
+SUBJECT_COMMAND_VERBS = frozenset("send delete wipe reveal ignore forget email run open visit remove share show tell print execute download disregard override forward reply ask post transfer".split())
+SUBJECT_BANNED_WORDS = frozenset("memories memory token password instructions prompt".split())
 
 
 def slug_of(name: str) -> "str | None":
@@ -526,7 +528,8 @@ def plain_name(name: str) -> "str | None":
     digits, a plain space, an apostrophe, a period, a hyphen and an ampersand, at most 5 words, starting with a letter or a digit.
     A letter of another script is out (a Cyrillic letter inside a Latin word looks like another name, and a name of one other script
     cannot make a slug). So is punctuation that makes a link, an address or a sentence, every invisible character (format, line and
-    paragraph separators), a name that cannot make a slug, and a name of 4 words or more with a command verb in it. Only the plain space
+    paragraph separators), a name that cannot make a slug, a name of 3 words or more that starts with a command verb, and a name that holds a banned word
+    (memory, token, password, instructions, prompt). Only the plain space
     is folded, so any other white space (checked before the fold) makes the name not plain. The same rule as the Worker's, which checks
     again."""
     if any(c.isspace() and c != " " for c in name):
@@ -549,7 +552,10 @@ def plain_name(name: str) -> "str | None":
         return None
     if slug_of(text) is None:
         return None
-    if len(parts) >= SUBJECT_COMMAND_MIN_WORDS and any(w in SUBJECT_COMMAND_VERBS for w in re.findall(r"[^\W_]+", text.lower())):
+    named = re.findall(r"[^\W_]+", text.lower())
+    if len(parts) >= SUBJECT_COMMAND_MIN_WORDS and named and named[0] in SUBJECT_COMMAND_VERBS:
+        return None
+    if any(w in SUBJECT_BANNED_WORDS for w in named):
         return None
     return text
 

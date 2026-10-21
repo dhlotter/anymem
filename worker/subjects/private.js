@@ -61,12 +61,29 @@ export async function visibleOnly(db, rows, actor, idOf = (r) => r.id) {
 /**
  * SQL that deletes the about links of one proposed card whose source memory has an about link to a private subject. Bind the card id.
  * A proposal is invisible to a closed device, so a memory that got a private link after it was proposed is hidden. Once the card is
- * accepted (or brought back) it is a shared subject, and the link would make that memory visible. So the link goes first.
+ * accepted (or brought back) it is a shared subject, and the link would make that memory visible. So the link goes first. Only a link the
+ * system made goes: a link a person made is theirs, and the system never deletes it.
  */
-export const DROP_PRIVATE_EVIDENCE_SQL = `DELETE FROM links WHERE target_id = ? AND link_type = 'about'
+export const DROP_PRIVATE_EVIDENCE_SQL = `DELETE FROM links WHERE target_id = ? AND link_type = 'about' AND made_by = 'system'
   AND source_id IN (SELECT x.source_id FROM links x JOIN subjects p ON p.id = x.target_id WHERE x.link_type = 'about' AND p.scope = 'private')`;
 
 /** SQL that deletes the links the system made from the members of one subject (bind its id twice) to subjects that are not private. For a subject that has just become private. */
 export const SHED_MEMBERS_SQL = `DELETE FROM links WHERE link_type = 'about' AND made_by = 'system' AND target_id <> ?
   AND source_id IN (SELECT source_id FROM links WHERE target_id = ? AND link_type = 'about')
   AND target_id IN (SELECT id FROM subjects WHERE scope <> 'private')`;
+
+/**
+ * SQL that deletes the links the system made to one subject (bind its id twice) from members that also belong to another private
+ * subject. For a subject that has just become shared: until now it was private, and a member of it that is also in another private subject
+ * was hidden. A link to a shared subject makes a memory visible to every device, so the system's link goes, the same as when a proposal is accepted.
+ */
+export const SHED_ON_SHARE_SQL = `DELETE FROM links WHERE target_id = ? AND link_type = 'about' AND made_by = 'system'
+  AND source_id IN (SELECT x.source_id FROM links x JOIN subjects p ON p.id = x.target_id WHERE x.link_type = 'about' AND p.scope = 'private' AND x.target_id <> ?)`;
+
+/**
+ * SQL that deletes the links the system made to subjects that are not private from every memory that has an about link to a private
+ * subject (no binds). For a store that was just restored from an older backup, whose links may predate a private link.
+ */
+export const SHED_ALL_SQL = `DELETE FROM links WHERE link_type = 'about' AND made_by = 'system'
+  AND target_id IN (SELECT id FROM subjects WHERE scope <> 'private')
+  AND source_id IN (SELECT x.source_id FROM links x JOIN subjects p ON p.id = x.target_id WHERE x.link_type = 'about' AND p.scope = 'private')`;

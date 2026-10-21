@@ -17,9 +17,11 @@ export const GENERIC_NAMES = new Set(
 
 /** A name is at most this many words. A sentence is not a name. */
 export const HINT_MAX_WORDS = 5;
-/** A name of more than this many words that holds one of the verbs below reads as a command ("Please send the report"), not as a name. */
-export const COMMAND_MIN_WORDS = 4;
-export const COMMAND_VERBS = new Set(["send", "delete", "reveal", "ignore", "forget", "email", "run", "open", "visit", "remove", "share", "show", "tell", "print", "execute", "download", "disregard", "override", "forward", "reply", "ask", "post"]);
+/** A name of this many words or more that starts with one of the verbs below reads as a command ("Delete All Memories"), not as a name. */
+export const COMMAND_MIN_WORDS = 3;
+export const COMMAND_VERBS = new Set(["send", "delete", "wipe", "reveal", "ignore", "forget", "email", "run", "open", "visit", "remove", "share", "show", "tell", "print", "execute", "download", "disregard", "override", "forward", "reply", "ask", "post", "transfer"]);
+/** A name never holds one of these words, wherever it stands: they are what an instruction talks about, and no honest subject is called by them. */
+export const BANNED_WORDS = new Set(["memories", "memory", "token", "password", "instructions", "prompt"]);
 const SLUG_MIN = 2;
 const SLUG_MAX = 40;
 
@@ -42,7 +44,8 @@ export function slugOf(name) {
 
 /**
  * The name as plain text (NFKC form, single plain spaces, nothing at the ends), or null when it is not plain, has more than
- * HINT_MAX_WORDS words, reads as a command, or cannot make a slug. Only the plain space is folded: any other kind of white space,
+ * HINT_MAX_WORDS words, reads as a command (three words or more that start with a command verb), holds a word that only an instruction would
+ * name (memory, token, password and the rest of BANNED_WORDS), or cannot make a slug. Only the plain space is folded: any other kind of white space,
  * checked before the fold, makes the name not plain.
  * @returns {string | null}
  */
@@ -51,7 +54,9 @@ export function plainName(name) {
   const parts = name.normalize("NFKC").split(" ").filter(Boolean);
   const text = parts.join(" ");
   if (parts.length > HINT_MAX_WORDS || !PLAIN_NAME.test(text) || slugOf(text) === null) return null;
-  if (parts.length >= COMMAND_MIN_WORDS && words(text).some((w) => COMMAND_VERBS.has(w))) return null;
+  const all = words(text);
+  if (parts.length >= COMMAND_MIN_WORDS && COMMAND_VERBS.has(all[0])) return null;
+  if (all.some((w) => BANNED_WORDS.has(w))) return null;
   return text;
 }
 

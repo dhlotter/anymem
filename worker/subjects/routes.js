@@ -43,7 +43,7 @@ export async function createSubject(c) {
 async function hideMembers({ env, ctx, now }, id) {
   await env.DB.prepare(SHED_MEMBERS_SQL).bind(id, id).run();
   const { results } = await env.DB.prepare("SELECT source_id FROM links WHERE target_id = ? AND link_type = 'about'").bind(id).all();
-  await clearCiting(env, { ids: results.map((r) => r.source_id), now, ctx, sharedOnly: true, why: "member.private" });
+  await clearCiting(env, { ids: results.map((r) => r.source_id), now, ctx, sharedOnly: true, why: "member.private", strict: true });
 }
 
 /** POST /subject/update {id | slug, name?, brief?, fields?, aliases?, scope?, status?} */
@@ -62,7 +62,7 @@ export async function updateSubject(c) {
   // A subject that turns private makes every member private, so the shared subjects the system linked those members to, and the shared briefs built from them, go now.
   if (body.scope === "private" && was !== "private") await hideMembers(c, id);
   // A private subject that turns shared may hold text of members that belong to another private subject, which a shared card must not.
-  if (body.scope === "shared" && was === "private") await clearIneligible(env, { now, ctx: c.ctx, only: id });
+  if (body.scope === "shared" && was === "private") await clearIneligible(env, { now, ctx: c.ctx, only: id, strict: true });
   if (body.name !== undefined || body.brief !== undefined || body.status === "active") indexLater(c, id);
   return json({ ok: true, subject });
 }

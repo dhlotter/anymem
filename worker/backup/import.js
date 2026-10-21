@@ -5,6 +5,8 @@
 import { badRequest, HttpError } from "../http.js";
 import { FTS_INSERT } from "../memory/store.js";
 import { memoryIdFits } from "../search/chunk.js";
+import { clearIneligible } from "../subjects/clear.js";
+import { SHED_ALL_SQL } from "../subjects/private.js";
 import { MEMORY_COLUMNS } from "./export.js";
 
 const PARALLEL = 10;
@@ -193,8 +195,9 @@ async function importDevices(db, devices, errors, reactivate, now) {
  * @param {Record<string, any>} body the parsed document
  * @param {{offset: number, limit: number}} page
  * @param {string[]} memoryIds receives the ids that were stored
+ * @param {{now?: () => number, ctx?: {waitUntil: (p: Promise<any>) => void}}} [by] now and ctx for the clearing that follows the last page
  */
-export async function importV2(env, body, { offset, limit }, memoryIds) {
+export async function importV2(env, body, { offset, limit }, memoryIds, { now = Date.now, ctx } = {}) {
   const db = env.DB;
   if (!Array.isArray(body.entries)) throw badRequest("entries must be a list.");
   const lists = Object.fromEntries(["versions", "questions", "links", "link_rejections", "subjects", "devices"].map((k) => [k, body[k] ?? []]));
@@ -250,6 +253,12 @@ export async function importV2(env, body, { offset, limit }, memoryIds) {
     const dev = await importDevices(db, lists.devices, errors, reactivate, Date.now());
     devices = dev.changes;
     reactivated = dev.reactivated;
+    // A backup older than the store may carry links the store has since taken away (the system's links to shared subjects of a memory that
+    // is private now, the derived_from links of a brief that was cleared). They come back with the links above, so the two rules that took them
+    // away run again over everything: the system's shared links go from memories that have a private link, and a card that cites a memory
+    // that may not feed it is blanked. The nightly run does the second one too, for what is left over.
+    await db.prepare(SHED_ALL_SQL).run();
+    await clearIneligible(env, { now, ctx });
   }
   return { ok: true, format: 2, ...counts, links, link_rejections: linkRejections, subjects, devices, reactivated_devices: reactivated, errors, next_offset: nextOffset, remaining };
 }

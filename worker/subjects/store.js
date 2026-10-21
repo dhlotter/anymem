@@ -5,7 +5,7 @@ import { badRequest, conflict, notFound } from "../http.js";
 import { createStore } from "../memory/store.js";
 import { parseMemory } from "../memory/parse.js";
 import { LIVE } from "../system.js";
-import { DROP_PRIVATE_EVIDENCE_SQL } from "./private.js";
+import { DROP_PRIVATE_EVIDENCE_SQL, SHED_ON_SHARE_SQL } from "./private.js";
 
 export const KINDS = ["person", "pet", "asset", "project", "area", "topic"];
 export const STATUSES = ["proposed", "active", "stale", "retired"];
@@ -219,18 +219,23 @@ export function createSubjectStore(db, now = Date.now) {
       const revived = f.status === "active" && cur.status === "retired" && f.brief === undefined && cur.body.trim() === PROPOSED_BRIEF;
       const brief = f.brief !== undefined ? checkBrief(f.brief) : revived ? "" : cur.body;
       // A changed brief was written by a person, so it is pinned too, unless the same request says otherwise.
-      const fieldsIn = f.brief !== undefined && brief !== cur.body.trim() ? withPin(f.fields, brief) : f.fields;
+      const written = f.brief !== undefined && brief !== cur.body.trim();
+      const fieldsIn = written ? withPin(f.fields, brief) : f.fields;
       if (fieldsIn !== undefined) set.fields = JSON.stringify(mergeFields(cur.kind, JSON.parse(cur.fields), fieldsIn, at));
-      if (f.name !== undefined || f.brief !== undefined || revived) await memories.update({ id, content: cardContent({ slug: cur.slug, kind: cur.kind, name, brief }) });
+      // The person's text cites no memory. The links of an earlier system build go in the same batch as the new text, or forgetting a
+      // memory that build cited would blank the person's own brief and its versions.
+      const own = written ? [db.prepare("DELETE FROM links WHERE source_id = ? AND link_type = 'derived_from'").bind(id)] : [];
+      if (f.name !== undefined || f.brief !== undefined || revived) await memories.update({ id, content: cardContent({ slug: cur.slug, kind: cur.kind, name, brief }), extra: own });
       set.updated_at = at;
       const columns = Object.keys(set);
       const save = db.prepare(`UPDATE subjects SET ${columns.map((c) => `${c} = ?`).join(", ")} WHERE id = ?`).bind(...columns.map((c) => set[c]), id);
       // A dismissed proposal that comes back turns into a shared subject, so evidence memories that have a private link since lose their link first.
-      if (f.status === "active" && cur.status === "retired") {
-        await db.batch([db.prepare(`${DROP_PRIVATE_EVIDENCE_SQL} AND EXISTS (SELECT 1 FROM memories WHERE id = ? AND status = 'pending')`).bind(id, id), save]);
-      } else {
-        await save.run();
-      }
+      // A private subject that turns shared the same: its members that also belong to another private subject lose the system's link to it.
+      const first = [];
+      if (f.status === "active" && cur.status === "retired") first.push(db.prepare(`${DROP_PRIVATE_EVIDENCE_SQL} AND EXISTS (SELECT 1 FROM memories WHERE id = ? AND status = 'pending')`).bind(id, id));
+      if (f.scope === "shared" && cur.scope === "private") first.push(db.prepare(SHED_ON_SHARE_SQL).bind(id, id));
+      if (first.length) await db.batch([...first, save]);
+      else await save.run();
       // A dismissed proposal still has a pending card. Bringing the subject back makes the card active too, or recall would never offer it.
       if (f.status === "active" && (await db.prepare("SELECT status FROM memories WHERE id = ?").bind(id).first())?.status === "pending") await memories.setStatus(id, "active");
       return get(id);
