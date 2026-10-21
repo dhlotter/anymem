@@ -14,7 +14,7 @@ capsule in the v2 shape the real Worker sends: flat sections with their text; `l
 `text`, to test the fallback), POST /capture (stored in srv.captured, returns an id), POST /extract (returns the configured
 proposals), POST /forget, /status, and the links: POST /link (kept in srv.links, the closed type list is checked, `supersedes` and
 `derived_from` are refused), POST /unlink (a removed system link is added to srv.rejections) and GET /links?id=ID (each link
-seen from that memory, the other end named from srv.names). Subjects: POST /subject and /subject/update, GET /subjects and
+seen from that memory, the other end named from srv.names). Subjects: POST /subject, /subject/update, /subject/accept and /subject/dismiss (only a proposed subject, else 409 not_proposed), GET /subjects and
 /subject?slug=SLUG|id=ID (kept in srv.subjects, members read from the `about` links in srv.links), GET /devices (srv.devices) and
 POST /devices/private. A /recall reply carries `subjects` only when start(subjects=[...]) was given them, as the real Worker does
 with SUBJECTS on. Any request without an Authorization bearer header gets 401.
@@ -125,6 +125,14 @@ def _subjects_route(state: FakeWorker, method: str, path: str, query: dict, b: d
         row.update(fields=fields, updated_at=at, **{k: b[k] for k in ("name", "brief", "scope", "status") if k in b})
         if "aliases" in b:
             row["aliases"] = [str(a).lower() for a in b["aliases"]]  # replaces the list, like the real Worker
+        return 200, {"ok": True, "subject": _subject_shape(state, row, True)}
+    if path in ("/subject/accept", "/subject/dismiss") and method == "POST":
+        row = found()
+        if not row:
+            return _refusal("not_found", "No subject with that slug.", 404)
+        if row["status"] != "proposed":
+            return _refusal("not_proposed", "That subject is not waiting for a click.", 409)
+        row.update(status="active" if path.endswith("accept") else "retired", updated_at=at)
         return 200, {"ok": True, "subject": _subject_shape(state, row, True)}
     if path == "/subjects" and method == "GET":
         rows = [r for r in state.subjects if all(not query.get(k) or r[k] == query[k][0] for k in ("kind", "status", "scope"))]
