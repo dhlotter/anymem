@@ -24,14 +24,19 @@ export function cleanLabel(value) {
 }
 
 /**
+ * The insert of one audit row, not yet run, so a caller can put several rows in one batch.
  * @param {any} db
  * @param {{ts: number, actor: {kind: string, id: string}, harness: string, script: string, method: string, route: string, status: number, durationMs: number, memoryIds: string[]}} row
  */
-export async function recordAudit(db, row) {
-  await db
+export function auditStatement(db, row) {
+  return db
     .prepare("INSERT INTO audit (ts, actor_kind, actor_id, harness, script, method, route, status, duration_ms, memory_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(row.ts, row.actor.kind, row.actor.id, cleanLabel(row.harness), cleanLabel(row.script), row.method.slice(0, 16), row.route.slice(0, MAX_ROUTE_CHARS), row.status, Math.max(0, Math.round(row.durationMs)), JSON.stringify(row.memoryIds.slice(0, MAX_IDS)))
-    .run();
+    .bind(row.ts, row.actor.kind, row.actor.id, cleanLabel(row.harness), cleanLabel(row.script), row.method.slice(0, 16), row.route.slice(0, MAX_ROUTE_CHARS), row.status, Math.max(0, Math.round(row.durationMs)), JSON.stringify(row.memoryIds.slice(0, MAX_IDS)));
+}
+
+/** @param {any} db @param {Parameters<typeof auditStatement>[1]} row */
+export async function recordAudit(db, row) {
+  await auditStatement(db, row).run();
 }
 
 /** Delete rows older than the retention window and return how many went. */

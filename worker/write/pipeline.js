@@ -9,13 +9,14 @@
 //  7. near        0.95 or above refuses, 0.85 to 0.95 stores with a warning
 //  8. contradict  a clash with a neighbour is settled by two agreeing model answers, else both stay live
 //  9. store       one D1 batch
-// 10. after       index and classify the kind in the background
+// 10. after       index and classify the kind in the background, then link the memory to its subjects (SUBJECTS_AUTO)
 //
 // The profile and person origins are pinned. They skip steps 6 to 8 and go straight to the store.
 import { createCounters } from "../counters.js";
 import { takeWriteSlot, writeRefused } from "../limits.js";
 import { ADMIN_ORIGINS, adminHeld, adminOnlyMessage, adminOnlyTags, parseMemory } from "../memory/parse.js";
 import { createStore } from "../memory/store.js";
+import { afterSubjects } from "../subjects/after.js";
 import { hiddenIds } from "../subjects/private.js";
 import { indexMemories } from "../search/indexer.js";
 import { judgeConflict } from "./conflict.js";
@@ -31,15 +32,24 @@ const SAME_NAME_ORIGINS = ["capture", ...PINNED_ORIGINS];
 const LIVE_SAME = "deleted_at IS NULL AND valid_until IS NULL";
 const round4 = (n) => Math.round(n * 10_000) / 10_000;
 
-/** Index and classify after the reply has gone. Each can fail alone, and the nightly job picks up what is missing. */
-async function afterWrite(env, id, now) {
+/**
+ * Index and classify after the reply has gone. Each can fail alone, and the nightly job picks up what is missing.
+ * Then the subject step, which does nothing unless SUBJECTS_AUTO is on and never throws. It runs last so its work never
+ * holds up the index, and it takes the neighbours the write already found, so it adds no search.
+ * @param {{content: string, neighbours: {id: string, similarity: number}[], hint?: {name: string, kind: string}, actor: {kind: string, id: string}, origin: string}} subjects
+ */
+async function afterWrite(env, id, now, subjects) {
   const counters = createCounters(env.DB, now);
   await Promise.allSettled([
     indexMemories(env, [id], now).catch(() => console.error("indexing failed")),
     classifyKind(env, id, counters),
   ]);
+  await afterSubjects(env, { id, now, counters, ...subjects });
   await counters.flush();
 }
+
+/** The text a subject's name is looked for in: the description and the body, never the name line, which is only a label. */
+const textOf = (parsed) => [parsed.description, parsed.body].filter(Boolean).join("\n");
 
 /**
  * @typedef {object} WriteContext
@@ -133,7 +143,8 @@ async function run({ env, ctx, now, actorId, actorKind, memoryIds }, w, counters
       const entry = await store.update({ id: same.id, content: parsed.content, tags: w.tags });
       memoryIds.push(entry.id);
       counters.bump("capture.updated_in_place");
-      ctx.waitUntil(afterWrite(env, entry.id, now));
+      // An update in place has no neighbours, so only the name match can link it.
+      ctx.waitUntil(afterWrite(env, entry.id, now, { content: textOf(parsed), neighbours: [], hint: w.subject, actor, origin: w.origin }));
       return { status: 200, body: { ok: true, id: entry.id, status: entry.status, tags: entry.tags, updated: true } };
     }
   }
@@ -196,6 +207,6 @@ async function run({ env, ctx, now, actorId, actorKind, memoryIds }, w, counters
   }
 
   // 10
-  ctx.waitUntil(afterWrite(env, entry.id, now));
+  ctx.waitUntil(afterWrite(env, entry.id, now, { content: textOf(parsed), neighbours, hint: w.subject, actor, origin: w.origin }));
   return { status: 200, body };
 }
