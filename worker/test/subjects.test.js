@@ -18,7 +18,7 @@ const device = async (app, label = "laptop") => (await post(app, "/devices", { l
 test("POST /subject makes the card memory and the row, and replies with the subject", async () => {
   const app = await createApp();
   const subject = await add(app, { aliases: ["Pipster", "pip "], fields: { species: "dog", breed: "terrier" } });
-  assert.deepEqual(Object.keys(subject).sort(), ["aliases", "brief", "fields", "id", "kind", "member_count", "members", "name", "scope", "slug", "status", "updated_at"]);
+  assert.deepEqual(Object.keys(subject).sort(), ["aliases", "brief", "built_at", "fields", "id", "kind", "member_count", "members", "name", "scope", "slug", "stale_reason", "status", "updated_at"]);
   assert.deepEqual([subject.slug, subject.kind, subject.name, subject.status, subject.scope, subject.brief, subject.member_count, subject.members], ["pip", "pet", "Pip", "active", "shared", "A small brown dog.", 0, []]);
   assert.deepEqual(subject.aliases, ["pipster", "pip"], "lowercase and trimmed");
   assert.deepEqual(subject.fields.species, { value: "dog", confirmed_at: app.clock.t, source: "user" });
@@ -105,7 +105,7 @@ test("POST /subject/update merges fields, replaces aliases and moves status and 
   const res = await post(app, "/subject/update", { slug: "pip", fields: { vet: null, breed: "terrier", species: "dog" }, aliases: ["Pippin"], scope: "private", status: "retired" });
   assert.equal(res.status, 200);
   const s = res.json.subject;
-  assert.deepEqual(Object.keys(s.fields).sort(), ["breed", "species"], "null removed vet");
+  assert.deepEqual(Object.keys(s.fields).sort(), ["breed", "brief_pinned", "species"], "null removed vet, and the brief written at creation is pinned");
   assert.equal(s.fields.species.confirmed_at, app.clock.t, "setting a key again confirms it again");
   assert.deepEqual([s.aliases, s.scope, s.status, s.updated_at], [["pippin"], "private", "retired", app.clock.t]);
   assert.equal((await post(app, "/subject/update", { id, status: "active" })).json.subject.status, "active", "found by id");
@@ -150,7 +150,7 @@ test("GET /subjects lists newest updated first with filters, and q matches slug,
   const list = async (query = "") => (await app.call(`/subjects${query}`)).json.subjects;
   const slugs = async (query) => (await list(query)).map((s) => s.slug);
   assert.deepEqual(await slugs(""), ["alpha", "cottage", "corolla", "pip"]);
-  assert.deepEqual(Object.keys((await list())[0]).sort(), ["aliases", "fields", "id", "kind", "member_count", "name", "scope", "slug", "status", "updated_at"]);
+  assert.deepEqual(Object.keys((await list())[0]).sort(), ["aliases", "built_at", "fields", "id", "kind", "member_count", "name", "scope", "slug", "stale_reason", "status", "updated_at"]);
   assert.deepEqual(await slugs("?kind=asset"), ["cottage", "corolla"]);
   assert.deepEqual(await slugs("?status=retired"), ["alpha"]);
   assert.deepEqual(await slugs("?scope=private"), ["cottage"]);

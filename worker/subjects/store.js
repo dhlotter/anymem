@@ -11,14 +11,17 @@ export const STATUSES = ["proposed", "active", "stale", "retired"];
 /** The statuses a person may set. The other two belong to the system. */
 export const SETTABLE_STATUSES = ["active", "retired"];
 export const SCOPES = ["shared", "private"];
-/** The keys a subject of each kind may hold. No health or money field is ever allowed on a person. */
+/**
+ * The keys a subject of each kind may hold. No health or money field is ever allowed on a person. Every kind may hold brief_pinned: a
+ * brief written by hand that the nightly step never rebuilds. Saving a brief through update sets it, and null removes it.
+ */
 export const FIELD_KEYS = {
-  person: ["relationship", "known_as", "work", "contact", "birthday"],
-  pet: ["name", "species", "breed", "born", "vet", "status", "health_note"],
-  asset: ["type", "name", "identifier", "acquired", "status", "value_note"],
-  project: ["what", "status", "owner", "repo"],
-  area: ["what", "status"],
-  topic: ["what"],
+  person: ["relationship", "known_as", "work", "contact", "birthday", "brief_pinned"],
+  pet: ["name", "species", "breed", "born", "vet", "status", "health_note", "brief_pinned"],
+  asset: ["type", "name", "identifier", "acquired", "status", "value_note", "brief_pinned"],
+  project: ["what", "status", "owner", "repo", "brief_pinned"],
+  area: ["what", "status", "brief_pinned"],
+  topic: ["what", "brief_pinned"],
 };
 
 export const MEMBER_CAP = 200;
@@ -95,13 +98,24 @@ export function mergeFields(kind, current, input, at) {
 /** The one line brief of a proposal. Accepting a proposal, or bringing a dismissed one back, whose brief is still this line clears it. */
 export const PROPOSED_BRIEF = "Proposed from conversation, waiting for your click.";
 
+/**
+ * The fields of a request with brief_pinned added when the request carries a brief that is not empty and does not say anything about
+ * the pin itself. Anything that is not an object comes back as it is, and mergeFields refuses it.
+ */
+function withPin(fields, brief) {
+  if (!brief) return fields;
+  if (fields === undefined) return { brief_pinned: "yes" };
+  if (fields === null || typeof fields !== "object" || Array.isArray(fields) || "brief_pinned" in fields) return fields;
+  return { ...fields, brief_pinned: "yes" };
+}
+
 /** The text of a card memory. The name line is the slug, the description holds the display name. */
 const cardContent = ({ slug, kind, name, brief }) => `---\nname: ${slug}\ndescription: ${kind} card for ${name}\nmetadata:\n  type: project\n---\n\n${brief}`;
 
 /** The display name sits in the card's description after "<kind> card for ". A card that was edited by hand falls back to the slug. */
 const nameOf = (row) => (row.description.startsWith(`${row.kind} card for `) ? row.description.slice(`${row.kind} card for `.length) : row.slug);
 
-const PICK = "s.id, s.slug, s.kind, s.status, s.scope, s.fields, s.aliases, s.created_at, s.updated_at, m.description, m.body";
+const PICK = "s.id, s.slug, s.kind, s.status, s.scope, s.fields, s.aliases, s.created_at, s.updated_at, s.built_at, s.stale_reason, m.description, m.body";
 
 /**
  * @param {any} db the D1 binding
@@ -121,6 +135,9 @@ export function createSubjectStore(db, now = Date.now) {
     fields: JSON.parse(row.fields),
     member_count: memberCount,
     updated_at: row.updated_at,
+    // When the system last built the brief, and why it is stale (a failed check, a model that did not answer, members that changed).
+    built_at: row.built_at ?? null,
+    stale_reason: row.stale_reason ?? "",
   });
 
   /** Live memories with an about link to each card, by card id. */
@@ -162,7 +179,9 @@ export function createSubjectStore(db, now = Date.now) {
       const aliases = f.aliases === undefined ? [] : checkAliases(f.aliases);
       const scope = f.scope === undefined ? "shared" : checkScope(f.scope);
       const at = now();
-      const fields = f.fields === undefined ? {} : mergeFields(kind, {}, f.fields, at);
+      // A person who writes a brief at creation wrote it by hand, so the nightly step leaves it alone.
+      const given = withPin(f.fields, brief);
+      const fields = given === undefined ? {} : mergeFields(kind, {}, given, at);
       const taken = () => conflict(`A subject with the slug ${slug} exists already.`, "subject_exists");
       if (await db.prepare("SELECT 1 AS n FROM subjects WHERE slug = ?").bind(slug).first()) throw taken();
       const parsed = await parseMemory(cardContent({ slug, kind, name, brief }), ["subject", `subject:${slug}`, `subject-kind:${kind}`]);
@@ -194,11 +213,13 @@ export function createSubjectStore(db, now = Date.now) {
         set.status = f.status;
       }
       if (f.aliases !== undefined) set.aliases = JSON.stringify(checkAliases(f.aliases));
-      if (f.fields !== undefined) set.fields = JSON.stringify(mergeFields(cur.kind, JSON.parse(cur.fields), f.fields, at));
       const name = f.name === undefined ? nameOf(cur) : checkName(f.name);
       // A dismissed proposal that comes back is a subject now, and the one line the system wrote is not a brief, the same as when it is accepted.
       const revived = f.status === "active" && cur.status === "retired" && f.brief === undefined && cur.body.trim() === PROPOSED_BRIEF;
       const brief = f.brief !== undefined ? checkBrief(f.brief) : revived ? "" : cur.body;
+      // A changed brief was written by a person, so it is pinned too, unless the same request says otherwise.
+      const fieldsIn = f.brief !== undefined && brief !== cur.body.trim() ? withPin(f.fields, brief) : f.fields;
+      if (fieldsIn !== undefined) set.fields = JSON.stringify(mergeFields(cur.kind, JSON.parse(cur.fields), fieldsIn, at));
       if (f.name !== undefined || f.brief !== undefined || revived) await memories.update({ id, content: cardContent({ slug: cur.slug, kind: cur.kind, name, brief }) });
       set.updated_at = at;
       const columns = Object.keys(set);

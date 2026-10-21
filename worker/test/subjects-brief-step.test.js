@@ -7,9 +7,11 @@ import { briefsStep, MAX_BUILDS } from "../cron/briefs.js";
 import { createBudget, countedEnv } from "../cron/budget.js";
 import { runMaintenance, STEPS } from "../cron/maintenance.js";
 import { createApp } from "./helpers/app.js";
-import { DAY, row, rows, seed, storeOf } from "./helpers/maintenance.js";
+import { DAY, indexAll, row, rows, seed, storeOf } from "./helpers/maintenance.js";
 import { note } from "./helpers/search.js";
-import { about, addSubject } from "./helpers/subjects.js";
+import { about, addSubject, device } from "./helpers/subjects.js";
+import { createProposed } from "../subjects/propose.js";
+import { KINDS } from "../subjects/store.js";
 import { memberHash } from "../subjects/brief.js";
 
 const ON = { SUBJECTS: "on", SUBJECTS_AUTO: "on" };
@@ -82,7 +84,7 @@ test("a good brief is saved as a new version of the card, with derived_from link
   const before = (await row(app, card)).content;
   app.clock.t += 1000;
   const { out } = await run(app);
-  assert.deepEqual(out, { candidates: 1, built: 1, stale: 0, failed: 0, conflicts: 0, retired: 0, pinned: 0, remaining: 0 });
+  assert.deepEqual(out, { candidates: 1, built: 1, stale: 0, failed: 0, conflicts: 0, retired: 0, cleared: 0, pinned: 0, remaining: 0 });
   const after = await row(app, card);
   assert.match(after.content, /^---\nname: pip\ndescription: pet card for Pip\n---\n\nNow\n- /);
   assert.match(after.body, /^Now\n- /);
@@ -117,7 +119,7 @@ test("a subject whose members have not changed is left alone, a changed member m
   assert.equal((await run(app)).out.built, 1);
   const calls = app.env.AI.calls.length;
   app.clock.t += DAY;
-  assert.deepEqual((await run(app)).out, { candidates: 0, built: 0, stale: 0, failed: 0, conflicts: 0, retired: 0, pinned: 0, remaining: 0 });
+  assert.deepEqual((await run(app)).out, { candidates: 0, built: 0, stale: 0, failed: 0, conflicts: 0, retired: 0, cleared: 0, pinned: 0, remaining: 0 });
   assert.equal(app.env.AI.calls.length, calls, "no model call when nothing changed");
   await storeOf(app).update({ id: ids[0], content: note("pip-note-0", "A sample.", "Pip weighs 13 kilos.") });
   app.clock.t += DAY;
@@ -299,16 +301,62 @@ test("a dead model leaves subjects, cards and links as they are, counts the fail
   assert.equal(out.failed, 4);
   assert.equal(app.env.AI.calls.length, 4, "the first four run at once, and when all of them fail the step gives up");
   assert.equal(out.refused, "the model did not answer");
-  assert.deepEqual(await rows(app, "SELECT * FROM subjects ORDER BY id"), before);
+  // The only change to a subject is the count of failures, in stale_reason. Its status, hash and times stay.
+  const after = await rows(app, "SELECT * FROM subjects ORDER BY id");
+  assert.deepEqual(after.map((r) => ({ ...r, stale_reason: "" })), before.map((r) => ({ ...r })));
+  assert.equal(after.filter((r) => r.stale_reason === "model.fail.1").length, 4);
   assert.deepEqual(await rows(app, "SELECT id, content, updated_at FROM memories ORDER BY id"), cards);
   assert.equal((await rows(app, "SELECT * FROM links WHERE link_type = 'derived_from'")).length, 0);
   assert.deepEqual((await auditRows(app)).map((a) => [a.route, a.status, a.script]), Array(4).fill(["brief.build", 500, "how:model.fail"]));
   assert.equal(made.length, 6);
 });
 
+test("a model that fails for a subject 3 nights in a row makes it stale with model.fail.3, and a failed subject waits behind the healthy ones", async () => {
+  const app = await world();
+  const bad = [];
+  for (let i = 0; i < 8; i++) bad.push((await subject(app, `bad${i}`, [`Bad subject ${i} note.`], { kind: "topic" })).card);
+  app.clock.t += 100;
+  const good = (await subject(app, "healthy", ["Healthy subject note."], { kind: "topic" })).card;
+  // The eight have failed once already. Before this fix they sorted first every night and the healthy one behind them was never built.
+  await app.env.DB.prepare("UPDATE subjects SET stale_reason = 'model.fail.1' WHERE id IN (SELECT value FROM json_each(?))").bind(JSON.stringify(bad)).run();
+  app.env.AI.reply(SMALL_MODEL, async (input) => {
+    const prompt = input.messages[1].content;
+    if (/^Subject: Bad/m.test(prompt)) return { response: "not json at all" };
+    return { response: { lines: blocks(prompt).map((b) => ({ section: "now", text: b.text.split("\n").at(-1), ids: [b.id] })) } };
+  });
+  const state = async () => await rows(app, "SELECT status, stale_reason FROM subjects WHERE id IN (SELECT value FROM json_each(?))", JSON.stringify(bad));
+  const one = await run(app);
+  assert.equal(one.out.built, 1, "the healthy subject is first in line");
+  assert.equal((await subjectRow(app, good)).status, "active");
+  assert.ok((await row(app, good)).body.includes("Healthy subject note."));
+  assert.ok((await state()).some((r) => r.stale_reason === "model.fail.2"), "the failures are counted");
+  for (let n = 0; n < 3; n++) {
+    app.clock.t += DAY;
+    await run(app);
+  }
+  const final = await state();
+  assert.ok(final.some((r) => r.status === "stale" && r.stale_reason === "model.fail.3"), JSON.stringify(final));
+  assert.ok(final.every((r) => /^model\.fail\.\d+$/.test(r.stale_reason) && r.status === (Number(r.stale_reason.split(".")[2]) >= 3 ? "stale" : "active")), JSON.stringify(final));
+});
+
+test("a model that answers again after failing clears the count", async () => {
+  const app = await world();
+  const { card } = await subject(app, "pip", ["Pip weighs 12 kilos."]);
+  app.env.AI.reply(SMALL_MODEL, () => {
+    throw new Error("down");
+  });
+  await run(app);
+  assert.equal((await subjectRow(app, card)).stale_reason, "model.fail.1");
+  model(app);
+  app.clock.t += DAY;
+  assert.equal((await run(app)).out.built, 1);
+  assert.equal((await subjectRow(app, card)).stale_reason, "");
+});
+
 test("the nightly run reports the step as failed when the model never answered, and ok when it did", async () => {
   const app = await world();
   await subject(app, "pip", ["Pip weighs 12 kilos."]);
+  const registered = STEPS.briefs;
   STEPS.briefs = briefsStep;
   try {
     app.env.AI.reply(SMALL_MODEL, () => {
@@ -323,7 +371,7 @@ test("the nightly run reports the step as failed when the model never answered, 
     assert.equal(fine.ok, true);
     assert.equal(fine.summary.briefs.built, 1);
   } finally {
-    delete STEPS.briefs;
+    STEPS.briefs = registered;
   }
 });
 
@@ -347,17 +395,18 @@ test("the step stops when the subrequest budget says no, and never goes over it"
   const app = await world();
   for (let i = 0; i < 10; i++) await subject(app, `thing${i}`, [`Thing ${i} is here.`], { kind: "topic" });
   model(app);
-  const small = await run(app, { subrequests: 20 });
+  // The step takes at most half of what the run has left, so a budget of 40 gives it 20.
+  const small = await run(app, { subrequests: 40 });
   assert.ok(small.spent <= 20, `spent ${small.spent}`);
   assert.equal(small.out.built, 4);
   assert.equal(small.out.remaining, 6);
   const tight = await world();
   await subject(tight, "pip", ["Pip weighs 12 kilos."]);
   model(tight);
-  const none = await run(tight, { subrequests: 5 });
-  assert.deepEqual(none, { out: { candidates: 0, built: 0, stale: 0, failed: 0, conflicts: 0, retired: 0, pinned: 0, remaining: 0, skipped: "budget" }, spent: 0 });
+  const none = await run(tight, { subrequests: 11 });
+  assert.deepEqual(none, { out: { candidates: 0, built: 0, stale: 0, failed: 0, conflicts: 0, retired: 0, cleared: 0, pinned: 0, remaining: 0, skipped: "budget" }, spent: 0 });
   assert.equal(tight.env.AI.calls.length, 0);
-  const exact = await run(tight, { subrequests: 6 });
+  const exact = await run(tight, { subrequests: 12 });
   assert.equal(exact.out.built, 1);
   assert.equal(exact.spent, 6);
 });
@@ -372,11 +421,21 @@ test("a build costs 4 subrequests, a failed one 3, and a night with nothing to d
   app.clock.t += DAY;
   const idle = await run(app);
   assert.equal(idle.spent, 1, "one batch of reads");
-  await app.env.DB.prepare("UPDATE subjects SET member_hash = '' WHERE id = ?").bind(card).run();
+  // A subject that was never built, the model forges a line: a failed check saves the stale mark and its audit row in one batch.
+  const fresh = await subject(app, "corolla", ["The Corolla is blue."], { kind: "asset" });
   model(app, async (lines) => lines.map((l) => ({ ...l, ids: [] })));
   const failed = await run(app);
   assert.equal(failed.out.stale, 1);
-  assert.equal(failed.spent, 2 + 3, "a failed check saves the stale mark and its audit row in one batch");
+  assert.equal(failed.spent, 2 + 3);
+  assert.equal((await subjectRow(app, fresh.card)).stale_reason, "no_citation");
+  // A built subject whose member changed: the old brief is cleared first (the card read and one batch), the card is read again, then the build.
+  app.clock.t += DAY;
+  await storeOf(app).update({ id: (await rows(app, "SELECT source_id FROM links WHERE target_id = ?", card))[0].source_id, content: note("pip-note-0", "A sample.", "Pip weighs 13 kilos.") });
+  model(app);
+  const changed = await run(app);
+  assert.equal(changed.out.cleared, 1);
+  assert.equal(changed.out.built, 2, "Pip and the stale Corolla");
+  assert.equal(changed.spent, 2 + 3 + 2 * 4);
 });
 
 test("the oldest brief goes first, a subject never built before all, and a stale subject after the healthy ones", async () => {
@@ -391,8 +450,8 @@ test("the oldest brief goes first, a subject never built before all, and a stale
   await set("aa", null);
   await set("cc", 200);
   model(app);
-  // room for exactly three builds
-  const { out } = await run(app, { subrequests: 14 });
+  // The three that were built before are cleared first (3 each), then room for exactly three builds. The order is the one before the clear.
+  const { out } = await run(app, { subrequests: 50 });
   assert.equal(out.built, 3);
   assert.deepEqual(app.prompts.map(subjectOf), ["Aa", "Bb", "Cc"]);
 });
@@ -566,4 +625,281 @@ test("migration 0007 adds the three columns with defaults to subjects that alrea
   await db.exec("INSERT INTO subjects (id, slug, kind, status, scope, fields, aliases, created_at, updated_at) VALUES ('c', 'pip', 'pet', 'active', 'shared', '{\"a\":1}', '[\"pippin\"]', 5, 6)");
   await db.exec(listMigrations().find((m) => m.version === 7).sql);
   assert.deepEqual({ ...(await db.prepare("SELECT slug, fields, aliases, created_at, updated_at, member_hash, built_at, stale_reason FROM subjects").first()) }, { slug: "pip", fields: '{"a":1}', aliases: '["pippin"]', created_at: 5, updated_at: 6, member_hash: "", built_at: null, stale_reason: "" });
+});
+
+// ------------------------------------------------------------------ the pin, through the API
+
+const post = (app, path, body) => app.call(path, { method: "POST", body });
+/** The calls to the small model, not the embedder that indexes a changed card. */
+const modelCalls = (app) => app.env.AI.calls.filter((c) => c.model === SMALL_MODEL).length;
+const pinOf = async (app, slug) => (await app.call(`/subject?slug=${slug}`)).json.subject.fields.brief_pinned?.value;
+
+test("brief_pinned can be set and removed through the API for every kind of subject", async () => {
+  const app = await world();
+  for (const kind of KINDS) {
+    const made = await post(app, "/subject", { slug: `s-${kind}`, kind, name: `S ${kind}` });
+    assert.equal(made.status, 200, JSON.stringify(made.json));
+    const set = await post(app, "/subject/update", { slug: `s-${kind}`, fields: { brief_pinned: "yes" } });
+    assert.equal(set.status, 200, `${kind}: ${JSON.stringify(set.json)}`);
+    assert.equal(set.json.subject.fields.brief_pinned.value, "yes");
+    assert.equal(set.json.subject.fields.brief_pinned.source, "user");
+    const off = await post(app, "/subject/update", { slug: `s-${kind}`, fields: { brief_pinned: null } });
+    assert.equal(off.json.subject.fields.brief_pinned, undefined, "null removes the pin");
+  }
+  assert.equal((await post(app, "/subject/update", { slug: "s-pet", fields: { brief_pinned: "" } })).json.code, "bad_field", "an empty value is not a pin");
+  assert.equal((await post(app, "/subject/update", { slug: "s-pet", fields: { nope: "x" } })).json.code, "bad_field", "other keys are still refused");
+});
+
+test("a brief a person writes through the API pins itself, and the nightly step leaves it alone", async () => {
+  const app = await world();
+  const made = await post(app, "/subject", { slug: "pip", kind: "pet", name: "Pip" });
+  const card = made.json.subject.id;
+  const m = await seed(app, { name: "n", text: "Pip is a beagle.", origin: "capture" });
+  await about(app, m, card);
+  assert.equal(await pinOf(app, "pip"), undefined, "nothing was written by hand yet");
+  await post(app, "/subject/update", { slug: "pip", brief: "My own careful brief about Pip." });
+  assert.equal(await pinOf(app, "pip"), "yes", "a brief written by a person is a pin");
+  model(app);
+  const { out } = await run(app);
+  assert.deepEqual([out.pinned, out.built, out.candidates], [1, 0, 0]);
+  assert.equal(modelCalls(app), 0);
+  assert.equal((await row(app, card)).body, "My own careful brief about Pip.");
+  // taking the pin off hands the brief back to the nightly step
+  await post(app, "/subject/update", { slug: "pip", fields: { brief_pinned: null } });
+  app.clock.t += DAY;
+  assert.equal((await run(app)).out.built, 1);
+  assert.match((await row(app, card)).body, /^Now\n- /);
+});
+
+test("a brief that is unchanged, empty or sent with its own pin value does not decide the pin by itself", async () => {
+  const app = await world();
+  await post(app, "/subject", { slug: "pip", kind: "pet", name: "Pip" });
+  await post(app, "/subject/update", { slug: "pip", name: "Pip the dog" });
+  assert.equal(await pinOf(app, "pip"), undefined, "a name change is not a brief");
+  await post(app, "/subject/update", { slug: "pip", brief: "" });
+  assert.equal(await pinOf(app, "pip"), undefined, "an empty brief pins nothing, it hands the card to the step");
+  await post(app, "/subject/update", { slug: "pip", brief: "Written.", fields: { brief_pinned: null } });
+  assert.equal(await pinOf(app, "pip"), undefined, "a request that says what the pin should be is obeyed");
+  await post(app, "/subject/update", { slug: "pip", brief: "Written again.", fields: { species: "dog" } });
+  assert.equal(await pinOf(app, "pip"), "yes", "other fields in the same request do not stop it");
+  await post(app, "/subject/update", { slug: "pip", fields: { brief_pinned: null } });
+  await post(app, "/subject/update", { slug: "pip", brief: "Written again.", name: "Pip" });
+  assert.equal(await pinOf(app, "pip"), undefined, "the same brief sent again is not a new one");
+  const created = await post(app, "/subject", { slug: "rex", kind: "pet", name: "Rex", brief: "Rex is the neighbour's dog." });
+  assert.equal(created.json.subject.fields.brief_pinned.value, "yes", "a subject made with a brief has a hand written brief");
+  assert.equal((await post(app, "/subject", { slug: "tilly", kind: "pet", name: "Tilly" })).json.subject.fields.brief_pinned, undefined);
+});
+
+// ------------------------------------------------------------------ a built brief is cleared when its members change
+
+const closedDevice = async (app) => (await device(app, { allowPrivate: false })).token;
+const recalled = async (app, token, slug) => (await app.call(`/recall?subject=${slug}`, { token })).json.subject;
+
+test("a member that later joins a private subject leaves the shared brief at once, and a closed device cannot read it", async () => {
+  const app = await world();
+  const shared = await addSubject(app, { slug: "cottage", kind: "asset", name: "Cottage" });
+  const priv = await addSubject(app, { slug: "dana", kind: "person", name: "Dana", scope: "private" });
+  const m = await seed(app, { name: "n", text: "Dana stays at the cottage when she is sick.", origin: "capture" });
+  await about(app, m, shared);
+  model(app);
+  assert.equal((await run(app)).out.built, 1);
+  const token = await closedDevice(app);
+  assert.match((await recalled(app, token, "cottage")).brief, /Dana stays at the cottage/, "before: the device reads the brief of a shared subject");
+  await about(app, m, priv); // the person says this memory is about Dana, who is private
+  app.clock.t += DAY;
+  const { out } = await run(app);
+  assert.equal(out.cleared, 1);
+  const s = await subjectRow(app, shared);
+  assert.deepEqual({ built: s.built_at, hash: s.member_hash, status: s.status, reason: s.stale_reason }, { built: null, hash: "", status: "stale", reason: "members_changed" });
+  assert.equal((await row(app, shared)).body, "");
+  assert.doesNotMatch(JSON.stringify(await recalled(app, token, "cottage")), /Dana stays|sick/);
+  assert.equal((await rows(app, "SELECT * FROM links WHERE source_id = ? AND link_type = 'derived_from'", shared)).length, 0, "and the link to the memory it came from");
+  assert.equal(app.prompts.map(subjectOf).filter((n) => n === "Cottage").length, 1, "no member is left to build the cottage from, so the model is not asked again");
+  assert.equal(app.prompts.map(subjectOf).filter((n) => n === "Dana").length, 1, "Dana's own brief is built from her own member");
+  const audit = (await auditRows(app)).filter((a) => a.route === "brief.clear");
+  assert.deepEqual(audit.map((a) => [a.actor_kind, a.harness, a.script, a.status, JSON.parse(a.memory_ids)]), [["system", "system", "how:members.gone", 200, [shared]]]);
+});
+
+test("when the last member is forgotten the brief goes with it", async () => {
+  const app = await world();
+  const { card, ids } = await subject(app, "pip", ["Pip hates the vet and bites."]);
+  model(app);
+  await run(app);
+  assert.match((await row(app, card)).body, /bites/);
+  await storeOf(app).softDelete(ids[0]);
+  app.clock.t += DAY;
+  const { out } = await run(app);
+  assert.equal(out.cleared, 1);
+  assert.equal((await row(app, card)).body, "");
+  assert.equal((await rows(app, "SELECT * FROM links WHERE source_id = ? AND link_type = 'derived_from'", card)).length, 0);
+  assert.equal(modelCalls(app), 1);
+});
+
+test("a rebuild that fails a check, a model that is down and a night with no budget all leave no old text behind", async () => {
+  for (const how of ["check", "model", "budget"]) {
+    const app = await world();
+    const { card, ids } = await subject(app, "pip", ["Pip weighs 12 kilos.", "Pip is secretly fed at night."]);
+    model(app);
+    await run(app);
+    assert.match((await row(app, card)).body, /secretly fed/);
+    // the member that says the secret changes, so the brief no longer comes from the members it was built from
+    app.clock.t += DAY;
+    await storeOf(app).update({ id: ids[1], content: note("pip-note-1", "A sample.", "Pip is fed at night.") });
+    if (how === "check") model(app, async (lines) => lines.map((l, i) => (i === 0 ? { ...l, ids: [] } : l)));
+    if (how === "model") app.env.AI.reply(SMALL_MODEL, () => { throw new Error("down"); });
+    const { out } = await run(app, { subrequests: how === "budget" ? 16 : 500 });
+    assert.equal(out.cleared, 1, how);
+    const body = (await row(app, card)).body;
+    assert.equal(body, "", `${how}: the old text is gone`);
+    assert.doesNotMatch(body, /secretly/);
+    const s = await subjectRow(app, card);
+    assert.equal(s.status, "stale", how);
+    assert.equal(s.built_at, null);
+    assert.equal((await rows(app, "SELECT * FROM links WHERE source_id = ? AND link_type = 'derived_from'", card)).length, 0, how);
+    assert.equal(s.stale_reason, { check: "no_citation", model: "model.fail.1", budget: "members_changed" }[how]);
+  }
+});
+
+test("the clear is a version of the card, so the person can still undo it", async () => {
+  const app = await world();
+  const { card, ids } = await subject(app, "pip", ["Pip weighs 12 kilos."]);
+  model(app);
+  await run(app);
+  const built = (await row(app, card)).content;
+  await storeOf(app).softDelete(ids[0]);
+  app.clock.t += DAY;
+  await run(app);
+  assert.equal((await row(app, card)).body, "");
+  assert.deepEqual((await rows(app, "SELECT reason FROM memory_versions WHERE memory_id = ? ORDER BY seq", card)).map((r) => r.reason), ["brief", "brief"]);
+  await storeOf(app).undo(card);
+  assert.equal((await row(app, card)).content, built);
+});
+
+test("a subject that is not built, or whose members did not change, is never cleared, and a pinned subject keeps its text", async () => {
+  const app = await world();
+  const field = (value) => ({ brief_pinned: { value, confirmed_at: 1, source: "user" } });
+  const mine = await subject(app, "pip", ["Pip weighs 12 kilos."], { fields: field("yes") });
+  await app.env.DB.prepare("UPDATE subjects SET built_at = 5, member_hash = 'old' WHERE id = ?").bind(mine.card).run();
+  const body = (await row(app, mine.card)).body;
+  const fresh = await subject(app, "corolla", ["The Corolla is blue."], { kind: "asset" });
+  model(app);
+  const { out } = await run(app);
+  assert.equal(out.cleared, 0);
+  assert.equal(out.built, 1);
+  assert.equal((await row(app, mine.card)).body, body);
+  app.clock.t += DAY;
+  assert.equal((await run(app)).out.cleared, 0, "the same members, nothing to clear");
+  assert.match((await row(app, fresh.card)).body, /^Now\n- /);
+});
+
+test("a private subject that is built is cleared the same way, from its own members", async () => {
+  const app = await world();
+  const { card, ids } = await subject(app, "dana", ["Dana is allergic to nuts."], { kind: "person", scope: "private" });
+  model(app);
+  await run(app);
+  assert.match((await row(app, card)).body, /allergic/);
+  await storeOf(app).unlink(ids[0], card, "about");
+  app.clock.t += DAY;
+  assert.equal((await run(app)).out.cleared, 1);
+  assert.equal((await row(app, card)).body, "");
+});
+
+// ------------------------------------------------------------------ the other fixes of the step
+
+test("a proposal accepted more than 60 days after it was made is not retired the same night", async () => {
+  const app = await world();
+  const now = () => app.clock.t;
+  const ev = await seed(app, { name: "garden-plan", text: "The garden project needs a new fence.", origin: "capture" });
+  await createProposed(app.env, { name: "Garden", kind: "project", evidence: [{ id: ev, confidence: 1 }], now });
+  app.clock.t += 61 * DAY;
+  const accepted = await post(app, "/subject/accept", { slug: "garden" });
+  assert.equal(accepted.json.subject.status, "active");
+  model(app);
+  const first = await run(app);
+  assert.equal(first.out.retired, 0, "accepting is a change of status, the 60 days start again");
+  assert.equal((await rows(app, "SELECT status FROM subjects WHERE slug = 'garden'"))[0].status, "active");
+  assert.equal(first.out.built, 1);
+  assert.equal((await rows(app, "SELECT status FROM subjects WHERE slug = 'garden'"))[0].status, "active", "building does not restart the 60 days either");
+  app.clock.t += 59 * DAY;
+  assert.equal((await run(app)).out.retired, 0);
+  app.clock.t += 2 * DAY;
+  assert.equal((await run(app)).out.retired, 1, "sixty days after the accept it is retired, with fewer than 3 members");
+});
+
+test("the step takes at most half of what is left, so merge still has budget on the Free limit of 40", async () => {
+  const app = await world();
+  for (let i = 0; i < 8; i++) await subject(app, `s${i}x`, [`Subject ${i} note.`], { kind: "topic" });
+  model(app);
+  const now = () => app.clock.t;
+  const budget = createBudget({ now, subrequests: 40 });
+  budget.spent = 6; // what the steps before this one used
+  const out = await briefsStep(countedEnv(app.env, budget), { now, budget });
+  assert.ok(budget.spent - 6 <= 17, `the step used ${budget.spent - 6} of the 34 that were left`);
+  assert.ok(budget.left() >= 17, `${budget.left()} are left for the steps after it`);
+  assert.ok(out.built >= 1 && out.built < 8, "it did some work and left the rest for the next night");
+  assert.equal(out.remaining, 8 - out.built);
+});
+
+test("in a whole night on the Free limit, merge still runs after eight subjects need a brief", async () => {
+  const app = await world();
+  for (let i = 0; i < 8; i++) await subject(app, `s${i}x`, [`Subject ${i} note.`], { kind: "topic" });
+  for (let i = 0; i < 4; i++) await seed(app, { name: `dup-${i}`, text: "The very same long sentence about kiln glaze porcelain firing schedule one two three.", ageDays: i });
+  await indexAll(app);
+  model(app);
+  app.clock.t += 1000;
+  const night = await runMaintenance(app.env, () => app.clock.t, { subrequests: 40, steps: ["briefs", "merge"] });
+  assert.ok(night.summary.briefs.built >= 1);
+  assert.ok(night.summary.briefs.subrequests <= 20, `briefs used ${night.summary.briefs.subrequests}`);
+  assert.ok(night.summary.merge.examined >= 1, `merge examined ${night.summary.merge.examined} with ${night.summary.merge.subrequests} subrequests`);
+});
+
+test("a line the model sends whose text is not text is dropped, never saved as garbage", async () => {
+  const app = await world();
+  const { card, ids } = await subject(app, "pip", ["Pip weighs 12 kilos."]);
+  model(app, async () => [
+    { section: "now", text: { a: 1 }, ids: [ids[0]] },
+    { section: "now", text: ["Pip", "is", "evil"], ids: [ids[0]] },
+    { section: "now", text: "Pip weighs 12 kilos.", ids: [ids[0]] },
+  ]);
+  assert.equal((await run(app)).out.built, 1);
+  const body = (await row(app, card)).body;
+  assert.equal(body, "Now\n- Pip weighs 12 kilos.");
+});
+
+test("a plain true brief is saved: digits and a date the way the members write them, a number word the member writes as a digit", async () => {
+  const app = await world();
+  const { card, ids } = await subject(app, "pip", ["Pip weighs 12 kilos and has 3 toys.", "The vet visit for Pip is on 3 November 2026 and costs 1,450 rand."]);
+  model(app, async () => [
+    { section: "now", text: "Pip weighs 12 kilos and has three toys.", ids: [ids[0]] },
+    { section: "now", text: "The vet visit is on 3 November 2026 and costs 1450 rand.", ids: [ids[1]] },
+    { section: "history", text: "The vet visit for Pip was booked for 2026-11-03.", ids: [ids[1]] },
+  ]);
+  const { out } = await run(app);
+  assert.deepEqual([out.built, out.stale], [1, 0]);
+  assert.match((await row(app, card)).body, /three toys[\s\S]*1450 rand[\s\S]*2026-11-03/);
+});
+
+test("the subject shape names when the brief was built and why it is stale", async () => {
+  const app = await world();
+  const { card } = await subject(app, "pip", ["Pip weighs 12 kilos."]);
+  assert.deepEqual([(await app.call("/subject?slug=pip")).json.subject.built_at, (await app.call("/subject?slug=pip")).json.subject.stale_reason], [null, ""]);
+  model(app, async (lines) => lines.map((l) => ({ ...l, ids: [] })));
+  await run(app);
+  const stale = (await app.call("/subject?slug=pip")).json.subject;
+  assert.deepEqual([stale.status, stale.built_at, stale.stale_reason], ["stale", null, "no_citation"]);
+  model(app);
+  app.clock.t += DAY;
+  await run(app);
+  const built = (await app.call("/subjects")).json.subjects.find((s) => s.id === card);
+  assert.deepEqual([built.status, built.built_at, built.stale_reason], ["active", app.clock.t, ""]);
+});
+
+test("the audit rows of the brief step are labelled Anymem, not Unknown", async () => {
+  const app = await world();
+  await subject(app, "pip", ["Pip weighs 12 kilos."]);
+  model(app);
+  await run(app);
+  const audit = await auditRows(app);
+  assert.ok(audit.length >= 1);
+  assert.ok(audit.every((a) => a.harness === "system"), JSON.stringify(audit.map((a) => a.harness)));
 });
