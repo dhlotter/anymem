@@ -1,10 +1,11 @@
 // The nightly clustering step and its preview. All sample subjects are invented (a Corolla, a garden app, Pip).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clusterStep, cohesion, slugOf } from "../cron/cluster.js";
+import { MAX_CHECKS, STOP, clusterStep, cohesion, slugOf } from "../cron/cluster.js";
+import { MAX_PROPOSED } from "../subjects/propose.js";
 import { createBudget, countedEnv } from "../cron/budget.js";
 import { ADMIN_TOKEN } from "./helpers/app.js";
-import { apart, clusterApp, group, indexAll, runStep, stubPropose } from "./helpers/cluster.js";
+import { DAY, apart, clusterApp, group, indexAll, runStep, stubPropose } from "./helpers/cluster.js";
 import { rows } from "./helpers/maintenance.js";
 import { addSubject, about, device } from "./helpers/subjects.js";
 
@@ -435,4 +436,173 @@ test("countedEnv leaves getByIds counted like any other Vectorize call", async (
   const env = countedEnv(app.env, budget);
   await env.VECTORIZE.getByIds([]);
   assert.equal(budget.spent, 1);
+});
+
+// ------------------------------------------------------------------ starvation, the memory of dropped groups, the cap of waiting proposals
+
+const memoOf = async (app) => JSON.parse((await rows(app, "SELECT value FROM meta WHERE key = 'cluster_memo'"))[0]?.value ?? "{}");
+
+test("no more than 6 groups are checked in a night, the rest are counted and wait", async () => {
+  const app = await clusterApp();
+  for (let t = 0; t < 8; t++) await group(app, { n: 6, topic: `loose${t}`, tag: `loose${t}tag`, text: (i) => apart(t * 6 + i) });
+  await indexAll(app);
+  const { summary } = await runStep(app, clusterStep, { propose: stubPropose() });
+  assert.equal(summary.checked, MAX_CHECKS);
+  assert.equal(app.env.VECTORIZE.getCalls, MAX_CHECKS, "one vector call per checked group, never more");
+  assert.equal(summary.dropped.check_limit, 2);
+});
+
+test("six big loose groups do not use every check every night, a good small group is reached the next night", async () => {
+  const app = await clusterApp();
+  for (let t = 0; t < 6; t++) await group(app, { n: 8, topic: `loose${t}`, tag: `loose${t}tag`, text: (i) => apart(t * 8 + i) });
+  await group(app, { n: 5, topic: "corolla", tag: "corolla" });
+  await indexAll(app);
+  const first = (await runStep(app, clusterStep, { propose: stubPropose() })).summary;
+  assert.equal(first.proposed, 0);
+  assert.equal(first.dropped.low_cohesion, 6);
+  assert.equal(first.dropped.check_limit, 1, "the good group was not reached tonight");
+  app.clock.t += DAY;
+  const second = (await runStep(app, clusterStep, { propose: stubPropose() })).summary;
+  assert.equal(second.dropped.recently_dropped, 6, "the loose groups are skipped without a vector call");
+  assert.deepEqual(second.slugs, ["corolla"]);
+  assert.equal(second.checked, 1);
+});
+
+test("a group dropped for low cohesion is looked at again after 7 days, not before", async () => {
+  const app = await clusterApp();
+  await group(app, { n: 6, topic: "ceramics", tag: "ceramics", text: apart });
+  await indexAll(app);
+  await runStep(app, clusterStep, { propose: stubPropose() });
+  assert.equal(app.env.VECTORIZE.getCalls, 1);
+  app.clock.t += 6 * DAY;
+  await runStep(app, clusterStep, { propose: stubPropose() });
+  assert.equal(app.env.VECTORIZE.getCalls, 1, "day 6: skipped");
+  app.clock.t += DAY;
+  const again = (await runStep(app, clusterStep, { propose: stubPropose() })).summary;
+  assert.equal(app.env.VECTORIZE.getCalls, 2, "day 7: checked again");
+  assert.equal(again.dropped.low_cohesion, 1);
+});
+
+test("only a cohesion drop is remembered, a group that waits for the indexer is checked again the next night", async () => {
+  const app = await clusterApp();
+  await group(app, { n: 5, topic: "corolla", tag: "corolla" });
+  const first = (await runStep(app, clusterStep, { propose: stubPropose() })).summary;
+  assert.equal(first.dropped.not_indexed, 1);
+  assert.equal((await memoOf(app)).corolla.d, undefined);
+  await indexAll(app);
+  app.clock.t += DAY;
+  assert.equal((await runStep(app, clusterStep, { propose: stubPropose() })).summary.proposed, 1);
+});
+
+test("equal sized groups take turns, the one checked longest ago goes first", async () => {
+  const app = await clusterApp();
+  const topics = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"];
+  for (const topic of topics) await group(app, { n: 5, topic, tag: topic });
+  // nothing is indexed, so night one checks the first six by name and the last two are not reached
+  const first = (await runStep(app, clusterStep, { propose: stubPropose() })).summary;
+  assert.equal(first.dropped.not_indexed, 6);
+  assert.equal(first.dropped.check_limit, 2);
+  await indexAll(app);
+  app.clock.t += DAY;
+  const second = (await runStep(app, clusterStep, { propose: stubPropose() })).summary;
+  assert.ok(second.slugs.includes("golf") && second.slugs.includes("hotel"), `proposed ${second.slugs}`);
+});
+
+test("the memo keeps entries 14 days, at most 200, and is written only by the step, never the preview", async () => {
+  const app = await clusterApp();
+  const today = Math.floor(app.clock.t / DAY);
+  const old = Object.fromEntries(Array.from({ length: 250 }, (_, i) => [`g${i}`, { k: today - (i < 20 ? 30 : 1), d: today - (i < 20 ? 30 : 1) }]));
+  await app.env.DB.prepare("INSERT INTO meta (key, value) VALUES ('cluster_memo', ?)").bind(JSON.stringify(old)).run();
+  await group(app, { n: 6, topic: "ceramics", tag: "ceramics", text: apart });
+  await indexAll(app);
+  const before = (await rows(app, "SELECT value FROM meta WHERE key = 'cluster_memo'"))[0].value;
+  await preview(app);
+  assert.equal((await rows(app, "SELECT value FROM meta WHERE key = 'cluster_memo'"))[0].value, before, "the preview wrote nothing");
+  await runStep(app, clusterStep, { propose: stubPropose() });
+  const memo = await memoOf(app);
+  const keys = Object.keys(memo);
+  assert.ok(keys.length <= 200, `${keys.length} entries`);
+  assert.ok(memo.ceramics.d, "the new drop is kept");
+  assert.ok(!keys.some((k) => /^g\d+$/.test(k) && Number(k.slice(1)) < 20), "entries older than 14 days are gone");
+});
+
+test("a memo that is not JSON is no memo", async () => {
+  const app = await clusterApp();
+  await app.env.DB.prepare("INSERT INTO meta (key, value) VALUES ('cluster_memo', 'not json')").run();
+  await group(app, { n: 5, topic: "corolla", tag: "corolla" });
+  await indexAll(app);
+  assert.equal((await runStep(app, clusterStep, { propose: stubPropose() })).summary.proposed, 1);
+});
+
+test("the preview skips a recently dropped group the way the step does", async () => {
+  const app = await clusterApp();
+  await group(app, { n: 6, topic: "ceramics", tag: "ceramics", text: apart });
+  await indexAll(app);
+  await runStep(app, clusterStep, { propose: stubPropose() });
+  const res = await preview(app);
+  assert.deepEqual(res.json.dropped.map((d) => [d.slug, d.reason]), [["ceramics", "recently_dropped"]]);
+});
+
+const waitingProposals = async (app, n) => {
+  for (let i = 0; i < n; i++) await addSubject(app, { slug: `wait${i}`, kind: "topic", status: "proposed" });
+};
+
+test("with the waiting proposals at the cap the step stops before any vector call", async () => {
+  const app = await clusterApp();
+  await waitingProposals(app, MAX_PROPOSED);
+  for (const topic of ["alpha", "bravo"]) await group(app, { n: 5, topic, tag: topic });
+  await indexAll(app);
+  const propose = stubPropose();
+  const { summary } = await runStep(app, clusterStep, { propose });
+  assert.equal(summary.proposed, 0);
+  assert.equal(propose.calls.length, 0);
+  assert.equal(summary.checked, 0);
+  assert.equal(app.env.VECTORIZE.getCalls ?? 0, 0);
+  assert.equal(summary.dropped.waiting_full, 2);
+});
+
+test("with room for two more the step proposes two, not three", async () => {
+  const app = await clusterApp();
+  await waitingProposals(app, MAX_PROPOSED - 2);
+  for (const topic of ["alpha", "bravo", "charlie"]) await group(app, { n: 5, topic, tag: topic });
+  await indexAll(app);
+  const { summary } = await runStep(app, clusterStep, { propose: stubPropose() });
+  assert.deepEqual(summary.slugs, ["alpha", "bravo"]);
+  assert.equal(summary.dropped.waiting_full, 1);
+});
+
+test("when createProposed says the list is full the step stops checking", async () => {
+  const app = await clusterApp();
+  for (const topic of ["alpha", "bravo", "charlie"]) await group(app, { n: 5, topic, tag: topic });
+  await indexAll(app);
+  const { summary } = await runStep(app, clusterStep, { propose: stubPropose({ refuse: "too_many" }) });
+  assert.equal(summary.checked, 1);
+  assert.equal(summary.dropped.too_many, 1);
+  assert.equal(summary.dropped.waiting_full, 2);
+});
+
+test("memory type words are never a subject name", async () => {
+  for (const word of ["feedback", "reference", "user", "project"]) assert.ok(STOP.has(word), word);
+  const app = await clusterApp();
+  await group(app, { n: 6, topic: "feedback", lead: "feedback" });
+  await group(app, { n: 6, topic: "reference", tag: "reference" });
+  await indexAll(app);
+  const propose = stubPropose();
+  const { summary } = await runStep(app, clusterStep, { propose });
+  assert.equal(propose.calls.length, 0);
+  assert.equal(summary.checked, 0);
+});
+
+test("a group named corolla is not proposed when toyota-corolla exists, and a part of a word does not count", async () => {
+  const app = await clusterApp();
+  await group(app, { n: 5, topic: "corolla", tag: "corolla" });
+  await group(app, { n: 5, topic: "estate", tag: "estate" });
+  await group(app, { n: 5, topic: "toyotas", tag: "toyotas" });
+  await indexAll(app);
+  await addSubject(app, { slug: "toyota-corolla", kind: "asset" });
+  await addSubject(app, { slug: "family-estate-car", kind: "asset" });
+  const propose = stubPropose();
+  const { summary } = await runStep(app, clusterStep, { propose });
+  assert.deepEqual(names(propose.calls), ["toyotas"], "toyotas is not a whole word of toyota-corolla");
+  assert.equal(summary.dropped.exists, 2);
 });

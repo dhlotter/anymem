@@ -6,6 +6,7 @@ import { DAY, seed, storeOf } from "./helpers/maintenance.js";
 import { recordAudit } from "../audit.js";
 import { ownerName, stepView, titleFrom } from "../dashboard-insights.js";
 import { PLAN_LIMITS } from "../plan-limits.js";
+import { addSubject } from "./helpers/subjects.js";
 
 const ME = "me@example.com";
 const recallRow = (app, over = {}) =>
@@ -495,4 +496,33 @@ test("the insight routes write nothing but their own audit row", async () => {
   assert.equal(await snapshot(), before);
   const rows = (await app.env.DB.prepare("SELECT DISTINCT route FROM audit").all()).results.map((r) => r.route);
   assert.ok(ROUTES.every((n) => rows.includes(`/ui/api/${n}`)));
+});
+
+test("a refused step says its own reason, and the backup text is kept for the backup", async () => {
+  assert.equal(stepView("briefs", { refused: "the model did not answer", failed: 3 }).headline, "the model did not answer");
+  assert.equal(stepView("briefs", { refused: "no brief could be saved" }).state, "refused");
+  assert.match(stepView("backup", { refused: { entries: 1, previous_entries: 9 } }).headline, /fewer entries than the last backup/);
+  assert.doesNotMatch(stepView("briefs", { refused: "the model did not answer" }).headline, /backup/);
+  assert.equal(stepView("merge", { refused: { entries: 1 } }).headline, "Refused.", "an object from another step is not described as a backup");
+  assert.equal(stepView("briefs", { refused: "x".repeat(500) }).headline.length, 160);
+  const app = await createApp();
+  await addRun(app, { ok: 0, summary: { briefs: { refused: "the model did not answer", candidates: 1, failed: 1 } } });
+  const step = (await api(app, "/ui/api/runs?n=1")).json.runs[0].steps[0];
+  assert.deepEqual([step.name, step.state, step.headline], ["briefs", "refused", "the model did not answer"]);
+});
+
+test("a subject card is neither never recalled nor a live or added memory on Home", async () => {
+  const app = await createApp({ env: { SUBJECTS: "on" } });
+  await seed(app, { name: "plain", ageDays: 100 });
+  const card = await addSubject(app, { slug: "pip", kind: "pet", name: "Pip" });
+  await app.env.DB.prepare("UPDATE memories SET created_at = ?, updated_at = ? WHERE id = ?").bind(app.clock.t - 100 * DAY, app.clock.t - 100 * DAY, card).run();
+  const never = (await api(app, "/ui/api/recalls")).json.never_recalled;
+  assert.equal(never.count, 1);
+  assert.deepEqual(never.sample.map((m) => m.title), ["plain"]);
+  // a fresh card, made today
+  await addSubject(app, { slug: "corolla", kind: "asset", name: "Corolla" });
+  const home = (await api(app, "/ui/api/home")).json;
+  assert.equal(home.headline.live, 1);
+  assert.equal(home.nav.live, 1);
+  assert.equal(home.headline.added_week, 0, "the new card is not a memory the person added");
 });
