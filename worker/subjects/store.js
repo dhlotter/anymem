@@ -92,6 +92,9 @@ export function mergeFields(kind, current, input, at) {
   return out;
 }
 
+/** The one line brief of a proposal. Accepting a proposal, or bringing a dismissed one back, whose brief is still this line clears it. */
+export const PROPOSED_BRIEF = "Proposed from conversation, waiting for your click.";
+
 /** The text of a card memory. The name line is the slug, the description holds the display name. */
 const cardContent = ({ slug, kind, name, brief }) => `---\nname: ${slug}\ndescription: ${kind} card for ${name}\nmetadata:\n  type: project\n---\n\n${brief}`;
 
@@ -193,8 +196,10 @@ export function createSubjectStore(db, now = Date.now) {
       if (f.aliases !== undefined) set.aliases = JSON.stringify(checkAliases(f.aliases));
       if (f.fields !== undefined) set.fields = JSON.stringify(mergeFields(cur.kind, JSON.parse(cur.fields), f.fields, at));
       const name = f.name === undefined ? nameOf(cur) : checkName(f.name);
-      const brief = f.brief === undefined ? cur.body : checkBrief(f.brief);
-      if (f.name !== undefined || f.brief !== undefined) await memories.update({ id, content: cardContent({ slug: cur.slug, kind: cur.kind, name, brief }) });
+      // A dismissed proposal that comes back is a subject now, and the one line the system wrote is not a brief, the same as when it is accepted.
+      const revived = f.status === "active" && cur.status === "retired" && f.brief === undefined && cur.body.trim() === PROPOSED_BRIEF;
+      const brief = f.brief !== undefined ? checkBrief(f.brief) : revived ? "" : cur.body;
+      if (f.name !== undefined || f.brief !== undefined || revived) await memories.update({ id, content: cardContent({ slug: cur.slug, kind: cur.kind, name, brief }) });
       set.updated_at = at;
       const columns = Object.keys(set);
       await db.prepare(`UPDATE subjects SET ${columns.map((c) => `${c} = ?`).join(", ")} WHERE id = ?`).bind(...columns.map((c) => set[c]), id).run();

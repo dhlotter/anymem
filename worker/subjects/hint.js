@@ -15,8 +15,25 @@ export const GENERIC_NAMES = new Set(
     "other general misc note notes memory memories assistant today tomorrow yesterday client customer server file files system data example test").split(" "),
 );
 
-const hasControl = (s) => /\p{Cc}/u.test(s);
+/** A name is at most this many words. A sentence is not a name. */
+export const HINT_MAX_WORDS = 5;
+// A name is letters of any script (with their marks), digits, a plain space, an apostrophe, a period, a hyphen and an ampersand.
+// Anything else is out: punctuation that makes a link, an address or a sentence ("eve@x.com", "https://x", "Dana says: ..."), and every
+// invisible character (format, line and paragraph separators), which could hide text or flip it. It must start with a letter or a digit.
+const PLAIN_NAME = /^[\p{L}\p{N}][\p{L}\p{M}\p{N} '’.&-]*$/u;
 const words = (name) => name.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+
+/**
+ * The name as plain text (composed form, single plain spaces, nothing at the ends), or null when it is not plain or has more than
+ * HINT_MAX_WORDS words. Only the plain space is folded, so any other kind of white space makes the name not plain.
+ * @returns {string | null}
+ */
+export function plainName(name) {
+  if (typeof name !== "string") return null;
+  const parts = name.normalize("NFC").split(" ").filter(Boolean);
+  const text = parts.join(" ");
+  return parts.length <= HINT_MAX_WORDS && PLAIN_NAME.test(text) ? text : null;
+}
 
 /** True for a name made only of generic words, or only of digits. */
 export function isGeneric(name) {
@@ -25,14 +42,15 @@ export function isGeneric(name) {
 }
 
 /**
- * The hint in its clean form, or null. A name is 2 to 60 characters without control characters or angle brackets, a kind is one of the
+ * The hint in its clean form, or null. A name is 2 to 60 characters of plain text (see isPlainName), a kind is one of the
  * subject kinds, and neither a secret nor an instruction nor a copy of our own injected blocks.
  * @returns {{name: string, kind: string} | null}
  */
 export function cleanHint(hint) {
   if (!hint || typeof hint !== "object" || Array.isArray(hint)) return null;
-  const name = typeof hint.name === "string" ? hint.name.split(/\s+/).filter(Boolean).join(" ") : "";
-  if (name.length < HINT_NAME_MIN || name.length > HINT_NAME_MAX || hasControl(hint.name) || /[<>]/.test(name)) return null;
+  // Checked on the raw text, before white space is folded, so a line separator or a no break space cannot slip through as a space.
+  const name = plainName(hint.name);
+  if (!name || name.length < HINT_NAME_MIN || name.length > HINT_NAME_MAX) return null;
   if (!KINDS.includes(hint.kind)) return null;
   if (isGeneric(name) || findSecret(name) || readsAsInstruction(name) || echoesInjected(name)) return null;
   return { name, kind: hint.kind };

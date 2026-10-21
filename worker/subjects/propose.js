@@ -6,12 +6,12 @@ import { parseMemory } from "../memory/parse.js";
 import { createStore } from "../memory/store.js";
 import { readsAsInstruction, screenExplicit } from "../write/screen.js";
 import { autoOn } from "./auto.js";
-import { cleanHint, HINT_ORIGINS, isGeneric, mentions } from "./hint.js";
-import { checkName, KINDS } from "./store.js";
+import { cleanHint, HINT_ORIGINS, isGeneric, mentions, plainName } from "./hint.js";
+import { checkName, KINDS, PROPOSED_BRIEF } from "./store.js";
 
-/** The one line brief of a proposal. Accepting a proposal whose brief is still this line clears it. */
-export const PROPOSED_BRIEF = "Proposed from conversation, waiting for your click.";
-/** Proposals waiting for a click at one time, from hints. More than this and a hint is dropped, so a flood of captures cannot bury the person. */
+export { PROPOSED_BRIEF };
+
+/** Proposals waiting for a click at one time. More than this and a proposal is refused, so a flood of captures cannot bury the person. The insert itself checks it. */
 export const MAX_PROPOSED = 25;
 const MAX_EVIDENCE = 50;
 const SLUG_MIN = 2;
@@ -52,7 +52,7 @@ const decimal = (n) => (Number.isInteger(n) ? n.toFixed(1) : String(n));
 async function audit(db, { step, conf, now, status, ids }) {
   // The script column keeps letters, digits and ._:- only, so the decision is written as how:hint.conf:1.0
   const script = `how:${STEPS[step].how}.conf:${decimal(conf)}`;
-  await recordAudit(db, { ts: now(), actor: { kind: "system", id: step }, harness: "", script, method: "SYSTEM", route: STEPS[step].route, status, durationMs: 0, memoryIds: ids }).catch(() => console.error("audit write failed"));
+  await recordAudit(db, { ts: now(), actor: { kind: "system", id: step }, harness: "system", script, method: "SYSTEM", route: STEPS[step].route, status, durationMs: 0, memoryIds: ids }).catch(() => console.error("audit write failed"));
 }
 
 /**
@@ -74,8 +74,10 @@ export async function createProposed(env, { name, kind, evidence, now, madeBy = 
   } catch {
     return { ok: false, reason: "bad_name" };
   }
+  // The same plain text rule as a hint, so a name from any caller cannot carry a link, an address, a sentence or hidden characters.
+  text = plainName(text);
+  if (!text) return { ok: false, reason: "bad_name" };
   if (!KINDS.includes(kind)) return { ok: false, reason: "bad_kind" };
-  if (/[<>]/.test(text)) return { ok: false, reason: "bad_name" };
   const slug = slugOf(text);
   if (!slug) return { ok: false, reason: "bad_name" };
   if (isGeneric(text) || isGeneric(slug.replace(/-/g, " "))) return { ok: false, reason: "generic" };
@@ -87,38 +89,65 @@ export async function createProposed(env, { name, kind, evidence, now, madeBy = 
   const folded = text.toLowerCase().split(/\s+/).join(" ");
   const who = STEPS[step] ? step : "propose";
   let cardId = null;
+  let rowMade = false;
+  let evidenced = false;
+  const memories = createStore(db, clock);
+  /** Undo a proposal that did not get its evidence: no subject row, the card in the trash, so the slug is free for a retry. Never throws. */
+  const undo = async () => {
+    if (rowMade) await db.prepare("DELETE FROM subjects WHERE id = ? AND status = 'proposed'").bind(cardId).run().catch(() => {});
+    if (cardId) await memories.softDelete(cardId).catch(() => {});
+  };
   try {
     // A slug in any status is taken, and so is a name an existing subject already answers to.
     const taken = await db.prepare("SELECT 1 AS n FROM subjects s WHERE s.slug = ? OR EXISTS (SELECT 1 FROM json_each(s.aliases) j WHERE j.value IN (?, ?)) LIMIT 1").bind(slug, folded, slug).first();
     if (taken) return { ok: false, reason: "exists" };
 
     const at = clock();
-    const memories = createStore(db, clock);
     const parsed = await parseMemory(cardContent({ slug, kind, name: text, brief: PROPOSED_BRIEF }), ["subject", `subject:${slug}`, `subject-kind:${kind}`]);
     const card = await memories.create({ ...parsed, origin: "system", status: "pending", harness: "" });
     cardId = card.id;
     try {
-      await db.prepare("INSERT INTO subjects (id, slug, kind, status, scope, fields, aliases, created_at, updated_at) VALUES (?, ?, ?, 'proposed', 'shared', '{}', '[]', ?, ?)").bind(card.id, slug, kind, at, at).run();
+      // The cap is part of the insert, so many proposals at once cannot all pass a check that each made before any of them wrote.
+      const made = await db
+        .prepare("INSERT INTO subjects (id, slug, kind, status, scope, fields, aliases, created_at, updated_at) SELECT ?, ?, ?, 'proposed', 'shared', '{}', '[]', ?, ? WHERE (SELECT COUNT(*) FROM subjects WHERE status = 'proposed') < ?")
+        .bind(card.id, slug, kind, at, at, MAX_PROPOSED)
+        .run();
+      if (made.meta.changes === 0) {
+        await undo();
+        return { ok: false, reason: "too_many" };
+      }
+      rowMade = true;
     } catch (err) {
       // Two proposals for one slug: the loser's card goes to the trash, and the nightly purge removes it.
-      await memories.softDelete(card.id).catch(() => {});
+      await undo();
       cardId = null;
       if (/UNIQUE constraint failed: subjects/.test(String(err?.message))) return { ok: false, reason: "exists" };
       throw err;
     }
-    // One batch for every link, each only when the memory is live and is not itself a card.
-    await db.batch(
+    // One batch for every link, each only when the memory is live, is not itself a card and does not belong to a private subject,
+    // because a link to a proposal (always shared) must never change who may see a memory that a person kept private.
+    const linked = await db.batch(
       proof.map((e) =>
         db
-          .prepare("INSERT OR IGNORE INTO links (source_id, target_id, link_type, created_at, made_by, confidence) SELECT ?, ?, 'about', ?, ?, ? WHERE EXISTS (SELECT 1 FROM memories WHERE id = ? AND deleted_at IS NULL) AND NOT EXISTS (SELECT 1 FROM subjects WHERE id = ?)")
-          .bind(e.id, card.id, at, madeBy, e.confidence, e.id, e.id),
+          .prepare(
+            "INSERT OR IGNORE INTO links (source_id, target_id, link_type, created_at, made_by, confidence) SELECT ?, ?, 'about', ?, ?, ? WHERE EXISTS (SELECT 1 FROM memories WHERE id = ? AND deleted_at IS NULL) AND NOT EXISTS (SELECT 1 FROM subjects WHERE id = ?) AND NOT EXISTS (SELECT 1 FROM links l JOIN subjects s ON s.id = l.target_id WHERE l.source_id = ? AND l.link_type = 'about' AND s.scope = 'private')",
+          )
+          .bind(e.id, card.id, at, madeBy, e.confidence, e.id, e.id, e.id),
       ),
     );
+    if (!linked.some((r) => r.meta.changes > 0)) {
+      // A proposal with no evidence is a card nobody can judge, and its slug would stay taken, so it is not kept.
+      await undo();
+      return { ok: false, reason: "no_evidence" };
+    }
+    evidenced = true;
     const conf = round2(proof.reduce((sum, e) => sum + e.confidence, 0) / proof.length);
     await audit(db, { step: who, conf, now: clock, status: 200, ids: [card.id, ...proof.map((e) => e.id)] });
     return { ok: true, slug, id: card.id };
   } catch {
     console.error("proposing a subject failed");
+    // Anything that went wrong before the evidence was written leaves no card and no row behind, so a retry is not told "exists" for ever.
+    if (!evidenced) await undo();
     await audit(db, { step: who, conf: 0, now: clock, status: 500, ids: [cardId, ...proof.map((e) => e.id)].filter(Boolean) });
     return { ok: false, reason: "failed" };
   }
@@ -137,9 +166,16 @@ export async function proposeFromHint(env, { memoryId, hint, now }) {
   const clean = cleanHint(hint);
   if (!clean) return { ok: false, reason: "bad_hint" };
   try {
-    const memory = await env.DB.prepare("SELECT content, origin, (SELECT COUNT(*) FROM subjects WHERE status = 'proposed') AS waiting FROM memories WHERE id = ? AND deleted_at IS NULL AND valid_until IS NULL AND status <> 'pending'").bind(memoryId).first();
+    // Only the description and the body count, as in the write path: the front matter holds a label and a type, not what the memory says.
+    // A memory that already belongs to a subject is left alone. It may belong to a private one, and a link to a new shared card would un-hide it.
+    const memory = await env.DB.prepare(
+      "SELECT description, body, origin, (SELECT COUNT(*) FROM subjects WHERE status = 'proposed') AS waiting, EXISTS (SELECT 1 FROM links WHERE source_id = memories.id AND link_type = 'about') AS linked FROM memories WHERE id = ? AND deleted_at IS NULL AND valid_until IS NULL AND status <> 'pending'",
+    )
+      .bind(memoryId)
+      .first();
     if (!memory || !HINT_ORIGINS.includes(memory.origin)) return { ok: false, reason: "bad_memory" };
-    if (!mentions(memory.content, clean.name)) return { ok: false, reason: "not_in_memory" };
+    if (memory.linked) return { ok: false, reason: "already_linked" };
+    if (!mentions([memory.description, memory.body].filter(Boolean).join("\n"), clean.name)) return { ok: false, reason: "not_in_memory" };
     if (memory.waiting >= MAX_PROPOSED) return { ok: false, reason: "too_many" };
   } catch {
     return { ok: false, reason: "failed" };
