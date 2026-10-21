@@ -34,6 +34,9 @@ def run(ns):
         body = {"content": f["payload"]["content"], "source": "session-capture", "tags": ["auto-capture", *origin]}
         if f["payload"].get("project"):
             body["project"] = f["payload"]["project"]
+        hint = f["payload"].get("subject")
+        if isinstance(hint, dict) and isinstance(hint.get("name"), str) and isinstance(hint.get("kind"), str):
+            body["subject"] = {"name": hint["name"], "kind": hint["kind"]}  # the Worker checks it again
         try:
             api.request("POST", "/capture", body, timeout=60)
             saved += 1

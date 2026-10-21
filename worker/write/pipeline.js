@@ -68,6 +68,7 @@ const textOf = (parsed) => [parsed.description, parsed.body].filter(Boolean).joi
  * @property {string} origin
  * @property {string} harness
  * @property {string} session
+ * @property {{name: string, kind: string}} [subject] the extractor's hint that this memory introduces a named thing, already cleaned by the route
  */
 
 /**

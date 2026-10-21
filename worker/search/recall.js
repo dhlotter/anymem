@@ -247,7 +247,7 @@ async function subjectsFor(db, results, actor) {
  */
 export async function recallSubject(env, { slug, topK, actor }) {
   const gate = sharedOnly(actor);
-  const card = await env.DB.prepare(`${CARD} AND s.slug = ?${gate.sql}`).bind(slug, ...gate.args).first();
+  const card = await env.DB.prepare(`${CARD} AND s.status <> 'proposed' AND s.slug = ?${gate.sql}`).bind(slug, ...gate.args).first();
   if (!card) return null;
   const { results: rows } = await env.DB
     .prepare("SELECT m.id, m.name, m.description, m.type, m.status, m.origin, m.harness, m.project, m.created_at, m.updated_at FROM memories m WHERE m.deleted_at IS NULL AND m.valid_until IS NULL AND m.status <> 'pending' AND m.id IN (SELECT source_id FROM links WHERE target_id = ? AND link_type = 'about') ORDER BY m.updated_at DESC, m.id DESC LIMIT ?")

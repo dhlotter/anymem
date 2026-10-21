@@ -1,6 +1,7 @@
-"""`subject.py list | show SLUG | add KIND SLUG NAME | set SLUG FIELD VALUE | alias SLUG NAME | scope SLUG shared|private | retire SLUG`:
+"""`subject.py list | show SLUG | add KIND SLUG NAME | set SLUG FIELD VALUE | alias SLUG NAME | scope SLUG shared|private | retire SLUG | accept SLUG | dismiss SLUG`:
 the things memories are about (a person, a pet, a car, a project) and the short brief that describes each one. Make or change one only
-when the person asks. The Worker writes the card memory, never write one by hand."""
+when the person asks. The Worker writes the card memory, never write one by hand.
+The system proposes subjects on its own (status proposed). Only the person decides: accept and dismiss are theirs to run, never the agent's."""
 from __future__ import annotations
 
 import re
@@ -14,6 +15,7 @@ COMMAND = "subject"
 HELP = "list, show, add and change subjects (a person, a pet, an asset, a project, an area, a topic)"
 
 KINDS = ("person", "pet", "asset", "project", "area", "topic")
+STATUSES = ("proposed", "active", "stale", "retired")
 SLUG = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")  # the Worker's rule, 2 to 40 characters
 
 
@@ -21,6 +23,7 @@ def register(parser):
     sub = parser.add_subparsers(dest="subject_action", metavar="ACTION", required=True)
     ls = sub.add_parser("list", help="every subject: slug, kind, status, scope, members, name")
     ls.add_argument("--kind", choices=KINDS)
+    ls.add_argument("--status", choices=STATUSES, help="only subjects with this status, proposed ones are waiting for the person's click")
     show = sub.add_parser("show", help="one subject: its fields, brief and members")
     show.add_argument("slug", metavar="SLUG")
     add = sub.add_parser("add", help="make a subject, active at once")
@@ -42,6 +45,10 @@ def register(parser):
     scope.add_argument("scope", metavar="SCOPE", choices=("shared", "private"))
     retire = sub.add_parser("retire", help="mark a subject retired, nothing is deleted")
     retire.add_argument("slug", metavar="SLUG")
+    accept = sub.add_parser("accept", help="the person's click: make a proposed subject active (never run by the agent)")
+    accept.add_argument("slug", metavar="SLUG")
+    dismiss = sub.add_parser("dismiss", help="the person's click: turn a proposed subject down, its slug stays taken (never run by the agent)")
+    dismiss.add_argument("slug", metavar="SLUG")
 
 
 def _one_line(text) -> str:
@@ -68,7 +75,8 @@ def _update(slug: str, **changes) -> dict:
 
 
 def _list(ns) -> int:
-    rows = shapes.subjects(api.request("GET", "/subjects" + ("?" + urlencode({"kind": ns.kind}) if ns.kind else ""), timeout=30))
+    query = {k: v for k, v in (("kind", ns.kind), ("status", ns.status)) if v}
+    rows = shapes.subjects(api.request("GET", "/subjects" + ("?" + urlencode(query) if query else ""), timeout=30))
     if not rows:
         print("no subjects")
         return 0
@@ -152,5 +160,20 @@ def _retire(ns) -> int:
     return 0
 
 
+def _decide(ns, action: str, past: str) -> int:
+    s = api.request("POST", "/subject/" + action, {"slug": ns.slug}, timeout=30).get("subject") or {}
+    skill.note_ids([s.get("id")])
+    print(f"{past} {_one_line(s.get('slug') or ns.slug)}")
+    return 0
+
+
+def _accept(ns) -> int:
+    return _decide(ns, "accept", "accepted")
+
+
+def _dismiss(ns) -> int:
+    return _decide(ns, "dismiss", "dismissed")
+
+
 def run(ns):
-    return {"list": _list, "show": _show, "add": _add, "set": _set, "alias": _alias, "scope": _scope, "retire": _retire}[ns.subject_action](ns)
+    return {"list": _list, "show": _show, "add": _add, "set": _set, "alias": _alias, "scope": _scope, "retire": _retire, "accept": _accept, "dismiss": _dismiss}[ns.subject_action](ns)

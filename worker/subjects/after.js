@@ -6,6 +6,7 @@ import { auditStatement } from "../audit.js";
 import { createStore } from "../memory/store.js";
 import { assignMemory } from "./assign.js";
 import { autoOn } from "./auto.js";
+import { proposeFromHint } from "./propose.js";
 
 /**
  * The audit row of a system action, not yet run. The script column keeps how it was decided, in the letters the column allows.
@@ -21,9 +22,6 @@ export const systemAudit = (env, ts, step, route, how, memoryIds, status = 200) 
 
 /** 1 is written 1.0 and 0.54 stays 0.54, so the audit text reads the same as the confidence column. */
 const confText = (c) => (Number.isInteger(c) ? c.toFixed(1) : String(c));
-
-/** The proposal step comes from its own module. It is loaded on use so this one stands without it. */
-const loadPropose = async () => (await import("./propose.js")).proposeFromHint;
 
 /**
  * @param {{DB: any}} env
@@ -57,7 +55,7 @@ export async function afterSubjects(env, { id, content, neighbours = [], hint, a
     }
     if (rows.length) await env.DB.batch(rows);
     if (hint && !assigned) {
-      await (propose ?? (await loadPropose()))(env, { memoryId: id, hint, now });
+      await (propose ?? proposeFromHint)(env, { memoryId: id, hint, now });
     }
   } catch {
     counters.bump("subjects.failed");
