@@ -11,6 +11,7 @@ import { cleanLabel, listAudit, recordAudit } from "./audit.js";
 import { takeModelSlot, takeWriteSlot, writeRefused } from "./limits.js";
 import { downloadBackupRoute, exportRoute, listBackupsRoute, runBackupRoute } from "./backup/backup.js";
 import { runMaintenance, runMaintenanceRoute } from "./cron/maintenance.js";
+import { clusterPreview } from "./subjects/cluster-routes.js";
 import { createDevice, listDevices, revokeDevice, setDevicePrivate } from "./devices.js";
 import { HttpError, errorResponse, json, notFound } from "./http.js";
 import { append, forget, getEntry, getLinks, history, link, listEntries, restore, setStatus, undo, unlink, update } from "./memory/routes.js";
@@ -66,6 +67,7 @@ const ROUTES = [
   { method: "GET", path: "/backup", admin: true, browser: true, handler: listBackupsRoute },
   { method: "POST", path: "/backup/run", admin: true, handler: runBackupRoute },
   { method: "POST", path: "/admin/run-maintenance", admin: true, handler: runMaintenanceRoute },
+  { method: "GET", path: "/admin/subjects/cluster-preview", admin: true, handler: clusterPreview },
   { method: "POST", path: "/vectorize-probe", handler: startProbe },
   { method: "GET", path: "/vectorize-probe", handler: readProbe },
   { method: "GET", path: "/prompt-capsules/core", browser: true, handler: capsuleRoute },
