@@ -1,7 +1,7 @@
 """`doctor`: one line per check, then a verdict. Exits 0 when every check passes, 1 otherwise.
 
 Checks run in order: config, reachable (with the Worker's version and vector index from /health), auth, capsule, unsaved, capsule
-cache, usage (counts and the last nightly run from /stats), backup, subjects (a count, only when the Worker has them), and with --probe the vector arm. The vector arm asks the Worker
+cache, usage (counts and the last nightly run from /stats), backup, subjects (counts by status and whether the system acts on its own, only when the Worker has them), and with --probe the vector arm. The vector arm asks the Worker
 to overwrite one probe vector (not a memory) and polls until a metadata filtered query finds it. It writes no memory.
 Nothing here prints a token or any other secret.
 """
@@ -258,9 +258,25 @@ def _backup_check(s: config.Settings, today=None) -> Check:
     return Check("backup", "ok", "latest nightly backup %s, %s memories" % (latest["day"], latest.get("entries", "?")))
 
 
+def _auto_text(s: config.Settings) -> str:
+    """Whether the system acts on subjects by itself, from the two switches GET /stats reports. Empty when the Worker does not say
+    (an older Worker, or a stats reply this client cannot read): a line that guesses is worse than a line that is shorter."""
+    try:
+        stats = api.request("GET", "/stats", timeout=TIMEOUT, settings=s)
+    except (api.ApiError, api.NetworkError):
+        return ""
+    if not isinstance(stats, dict) or not isinstance(stats.get("subjects_auto"), bool):
+        return ""
+    if not stats["subjects_auto"]:
+        return ", auto off"
+    # Automation needs the subject layer too. With SUBJECTS off the Worker does nothing new, so say that instead of "auto on".
+    return ", auto on" if stats.get("subjects_on") is True else ", auto set but SUBJECTS is off, so it does nothing"
+
+
 def _subjects_check(s: config.Settings) -> Optional[Check]:
-    """How many subjects there are, informational. None, so no line at all, when the Worker does not answer GET /subjects
-    (an older Worker, or a token that may not read it): a feature this Worker lacks is not something to report."""
+    """How many subjects there are by status, and whether the system proposes and links on its own. Informational. None, so no line
+    at all, when the Worker does not answer GET /subjects (an older Worker, or a token that may not read it): a feature this Worker
+    lacks is not something to report. Proposed subjects wait for a click, so their count is the one a person acts on."""
     try:
         reply = api.request("GET", "/subjects", timeout=TIMEOUT, settings=s)
     except (api.ApiError, api.NetworkError):
@@ -268,7 +284,9 @@ def _subjects_check(s: config.Settings) -> Optional[Check]:
     if not isinstance(reply, dict) or not isinstance(reply.get("subjects"), list):
         return None
     rows = shapes.subjects(reply)
-    return Check("subjects", "info", "%d active, %d private" % (sum(r.get("status") == "active" for r in rows), sum(r.get("scope") == "private" for r in rows)))
+    count = lambda status: sum(r.get("status") == status for r in rows)
+    detail = "%d active, %d proposed, %d stale, %d private" % (count("active"), count("proposed"), count("stale"), sum(r.get("scope") == "private" for r in rows))
+    return Check("subjects", "info", detail + _auto_text(s))
 
 
 def _probe(s: config.Settings, interval: float, window: float, sleep: Callable[[float], None]) -> List[Check]:
