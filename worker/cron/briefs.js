@@ -26,6 +26,7 @@ const READ_COST = 2; // the first batch of reads and the batch that reads the me
 const RETIRE_COST = 1;
 // After this many failed model calls in a row the model is taken to be down, and the step stops.
 const OUTAGE_AFTER = 2;
+const PARALLEL = 4;
 
 const MEMBER_LIVE = "m.deleted_at IS NULL AND m.valid_until IS NULL AND m.status <> 'pending'";
 // A memory that has an about link to a private subject.
@@ -191,32 +192,43 @@ export async function briefsStep(env, { now, budget }) {
   // Healthy subjects first, and the ones that failed last. Within each the oldest brief first, a subject never built before all.
   candidates.sort((a, b) => (a.status === "stale") - (b.status === "stale") || (a.built_at ?? -1) - (b.built_at ?? -1) || (a.id < b.id ? -1 : 1));
   out.candidates = candidates.length;
-  const chosen = candidates.slice(0, Math.min(MAX_BUILDS, Math.max(0, Math.floor((budget.left() - 1) / BUILD_COST))));
-  if (!chosen.length || !budget.has(READ_COST)) {
+  const chosen = candidates.slice(0, MAX_BUILDS);
+  if (!chosen.length || !budget.has(1 + BUILD_COST)) {
     out.remaining = candidates.length;
     return out;
   }
   const texts = await env.DB.batch(chosen.map((s) => env.DB.prepare(membersSql(s.scope)).bind(s.id)));
   let down = 0;
   let attempted = 0;
-  for (let i = 0; i < chosen.length; i++) {
-    if (!budget.has(BUILD_COST)) break;
-    const shown = texts[i].results;
-    if (!shown.length) continue;
-    attempted++;
-    try {
-      const result = await buildOne(env, { now, store }, chosen[i], shown);
+  // A few builds run at once, because the model is the slow part and the whole step has a time limit. The budget is reserved for the whole group first.
+  for (let at = 0; at < chosen.length && down < OUTAGE_AFTER; ) {
+    let size = Math.min(PARALLEL, chosen.length - at);
+    while (size > 0 && !budget.has(BUILD_COST * size)) size--;
+    if (!size) break;
+    const group = chosen.slice(at, at + size).map((subject, j) => ({ subject, shown: texts[at + j].results }));
+    at += size;
+    const results = await Promise.all(
+      group.map(async ({ subject, shown }) => {
+        if (!shown.length) return "skipped";
+        try {
+          return await buildOne(env, { now, store }, subject, shown);
+        } catch (err) {
+          // A write that failed is counted, and the other subjects still get their turn.
+          console.error("brief build failed", err?.name);
+          return "error";
+        }
+      }),
+    );
+    for (const result of results) {
+      if (result === "skipped") continue;
+      attempted++;
       if (result === "built") out.built++;
       else if (result === "stale") out.stale++;
       else if (result === "conflict") out.conflicts++;
       else out.failed++;
-      down = result === "outage" ? down + 1 : 0;
-    } catch (err) {
-      // A write that failed is counted and the next subject still gets its turn.
-      out.failed++;
-      console.error("brief build failed", err?.name);
     }
-    if (down >= OUTAGE_AFTER) break;
+    const tried = results.filter((r) => r !== "skipped");
+    down = tried.length && tried.every((r) => r === "outage") ? down + tried.length : 0;
   }
   out.remaining = candidates.length - out.built;
   // The run is not ok when every build failed (the model did not answer, or a write failed), the same as a backup that was refused.

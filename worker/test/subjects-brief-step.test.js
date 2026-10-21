@@ -132,6 +132,30 @@ test("a subject whose members have not changed is left alone, a changed member m
   assert.deepEqual((await rows(app, "SELECT target_id FROM links WHERE source_id = ? AND link_type = 'derived_from'", card)).map((r) => r.target_id).sort(), [ids[0], extra].sort());
 });
 
+test("a rebuild replaces the derived_from links, so a member that is no longer cited loses its link", async () => {
+  const app = await world();
+  const { card, ids } = await subject(app, "pip", ["Pip weighs 12 kilos.", "Pip is a beagle."]);
+  model(app);
+  await run(app);
+  const links = async () => (await rows(app, "SELECT target_id FROM links WHERE source_id = ? AND link_type = 'derived_from'", card)).map((r) => r.target_id).sort();
+  assert.deepEqual(await links(), [...ids].sort());
+  await storeOf(app).unlink(ids[1], card, "about");
+  app.clock.t += DAY;
+  assert.equal((await run(app)).out.built, 1);
+  assert.deepEqual(await links(), [ids[0]]);
+});
+
+test("a brief with a hashtag in a member's text does not give the card a tag", async () => {
+  const app = await world();
+  const { card } = await subject(app, "pip", ["Pip likes #walks in the park."]);
+  const tags = async () => (await rows(app, "SELECT tag FROM memory_tags WHERE memory_id = ? ORDER BY tag", card)).map((r) => r.tag);
+  const before = await tags();
+  model(app);
+  await run(app);
+  assert.match((await row(app, card)).body, /Pip likes walks in the park\./);
+  assert.deepEqual(await tags(), before);
+});
+
 test("a subject with no live member, a trashed member or a closed member has nothing to build from", async () => {
   const app = await world();
   const lone = await subject(app, "pip", ["Pip weighs 12 kilos."]);
@@ -261,10 +285,10 @@ test("a card that lost its frontmatter is marked stale with bad_card", async () 
 
 // ------------------------------------------------------------------ a model that does not answer
 
-test("a dead model leaves subjects, cards and links as they are, counts the failure and stops after two", async () => {
+test("a dead model leaves subjects, cards and links as they are, counts the failure and stops", async () => {
   const app = await world();
   const made = [];
-  for (const slug of ["pip", "corolla", "dana"]) made.push(await subject(app, slug, [`${cap(slug)} is here.`]));
+  for (const slug of ["pip", "corolla", "dana", "cottage", "garden", "tilly"]) made.push(await subject(app, slug, [`${cap(slug)} is here.`]));
   app.env.AI.reply(SMALL_MODEL, () => {
     throw new Error("the model is down");
   });
@@ -272,14 +296,14 @@ test("a dead model leaves subjects, cards and links as they are, counts the fail
   const cards = await rows(app, "SELECT id, content, updated_at FROM memories ORDER BY id");
   const { out } = await run(app);
   assert.equal(out.built + out.stale, 0);
-  assert.equal(out.failed, 2, "two calls, then the step gives up");
-  assert.equal(app.env.AI.calls.length, 2);
+  assert.equal(out.failed, 4);
+  assert.equal(app.env.AI.calls.length, 4, "the first four run at once, and when all of them fail the step gives up");
   assert.equal(out.refused, "the model did not answer");
   assert.deepEqual(await rows(app, "SELECT * FROM subjects ORDER BY id"), before);
   assert.deepEqual(await rows(app, "SELECT id, content, updated_at FROM memories ORDER BY id"), cards);
   assert.equal((await rows(app, "SELECT * FROM links WHERE link_type = 'derived_from'")).length, 0);
-  assert.deepEqual((await auditRows(app)).map((a) => [a.route, a.status, a.script]), [["brief.build", 500, "how:model.fail"], ["brief.build", 500, "how:model.fail"]]);
-  assert.equal(made.length, 3);
+  assert.deepEqual((await auditRows(app)).map((a) => [a.route, a.status, a.script]), Array(4).fill(["brief.build", 500, "how:model.fail"]));
+  assert.equal(made.length, 6);
 });
 
 test("the nightly run reports the step as failed when the model never answered, and ok when it did", async () => {

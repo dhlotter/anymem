@@ -167,6 +167,7 @@ test("tidyLines puts Now before History, strips marks, and drops whole lines pas
     { section: "now", text: "Bad ids.", ids: [] },
     { section: "history", text: "Pip is a beagle.", ids: ["a", "b"] },
   ]);
+  assert.equal(tidyLines({ lines: [line("Pip likes #walks and (#dinner).", ["a"])] })[0].text, "Pip likes walks and (dinner).", "a hashtag would become a tag of the card");
   assert.deepEqual(tidyLines(null), []);
   assert.deepEqual(tidyLines({ lines: "nope" }), []);
   const many = tidyLines({ lines: Array.from({ length: 30 }, (_, i) => line(`Fact number ${i}.`, ["a"])) });
