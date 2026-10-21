@@ -822,3 +822,129 @@ test("Not this on a member the system linked posts /unlink with the member as so
   assert.equal(panelOf(w).querySelector('[data-action="subject-unlink"][data-other="m1"]'), null, "the link is gone from the reloaded card");
   assert.ok(panelOf(w).querySelector('[data-action="subject-unlink"][data-other="m2"]'), "the other one stays");
 });
+
+// Double submit, and what the drawer says about where a brief came from.
+
+test("Home: a double click on Accept sends one request, and both buttons of the row stay off until it ends", async () => {
+  const w = homeWorld([proposal(), proposal({ id: "card-corolla", slug: "corolla", name: "The Corolla" })]);
+  const gate = deferred();
+  const original = w.answers["/subject/accept"];
+  w.answers["/subject/accept"] = (path, opts) => gate.promise.then(() => original(path, opts));
+  homeMount(w.root, w.ctx, "");
+  await flush();
+  const row = waiting(w).querySelector('tr[data-slug="pip"]');
+  const accept = row.querySelector('[data-action="subject-accept"]');
+  const dismiss = row.querySelector('[data-action="subject-dismiss"]');
+  accept.click();
+  accept.click();
+  await flush();
+  assert.equal(accept.disabled, true);
+  assert.equal(dismiss.disabled, true, "Dismiss is off while Accept is on its way");
+  dismiss.click();
+  await flush();
+  assert.equal(w.calls.filter((c) => c.path === "/subject/accept").length, 1);
+  assert.equal(w.calls.filter((c) => c.path === "/subject/dismiss").length, 0, "no second answer for the same row");
+  const other = waiting(w).querySelector('tr[data-slug="corolla"] [data-action="subject-accept"]');
+  assert.equal(other.disabled, false, "another row is not held");
+  gate.resolve();
+  await flush();
+  assert.deepEqual([...waiting(w).querySelectorAll("tr[data-slug]")].map((r) => r.dataset.slug), ["corolla"]);
+});
+
+test("Home: a refused answer gives both buttons back, and the failure goes away once a later answer works", async () => {
+  const w = homeWorld([proposal(), proposal({ id: "card-corolla", slug: "corolla", name: "The Corolla" })]);
+  w.state.refuse = new ApiError(409, "not_proposed", "That subject is not waiting for a click.");
+  homeMount(w.root, w.ctx, "");
+  await flush();
+  const row = waiting(w).querySelector('tr[data-slug="pip"]');
+  row.querySelector('[data-action="subject-accept"]').click();
+  await flush();
+  assert.match(w.root.querySelector("[data-status]").textContent, /not waiting for a click/);
+  assert.equal(row.querySelector('[data-action="subject-accept"]').disabled, false);
+  assert.equal(row.querySelector('[data-action="subject-dismiss"]').disabled, false);
+  w.state.refuse = null;
+  waiting(w).querySelector('tr[data-slug="corolla"] [data-action="subject-accept"]').click();
+  await flush();
+  assert.equal(w.root.querySelector("[data-status]").textContent, "", "the old failure is gone");
+  assert.equal(w.root.querySelector("[data-status]").getAttribute("role"), null);
+});
+
+test("the drawer: a double click on Accept sends one request and Dismiss is off while it runs", async () => {
+  const w = proposedWorld();
+  await openCard(w);
+  const gate = deferred();
+  const original = w.answers["/subject/accept"];
+  w.answers["/subject/accept"] = (path, opts) => gate.promise.then(() => original(path, opts));
+  const accept = panelOf(w).querySelector('[data-action="subject-accept"]');
+  const dismiss = panelOf(w).querySelector('[data-action="subject-dismiss"]');
+  accept.click();
+  accept.click();
+  dismiss.click();
+  await flush();
+  assert.equal(accept.disabled, true);
+  assert.equal(dismiss.disabled, true);
+  assert.equal(w.calls.filter((c) => c.path === "/subject/accept").length, 1);
+  assert.equal(w.calls.filter((c) => c.path === "/subject/dismiss").length, 0);
+  gate.resolve();
+  await flush();
+  assert.match(panelOf(w).textContent, /Accepted/);
+});
+
+test("the drawer: a refused Accept gives the buttons back, and a later success clears the failure", async () => {
+  const w = proposedWorld();
+  await openCard(w);
+  w.state.refuse = new ApiError(409, "not_proposed", "That subject is not waiting for a click.");
+  panelOf(w).querySelector('[data-action="subject-accept"]').click();
+  await flush();
+  assert.match(panelOf(w).textContent, /not waiting for a click/);
+  assert.equal(panelOf(w).querySelector('[data-action="subject-accept"]').disabled, false);
+  w.state.refuse = null;
+  panelOf(w).querySelector('[data-action="subject-accept"]').click();
+  await flush();
+  assert.doesNotMatch(panelOf(w).textContent, /not waiting for a click/);
+  assert.match(panelOf(w).textContent, /Accepted/);
+});
+
+const BUILT = Date.UTC(2026, 9, 20, 12);
+
+test("the drawer says when the brief was built and that anymem wrote it, only for a brief it built", async () => {
+  const w = subjectWorld({ card: { built_at: BUILT, stale_reason: "" } });
+  await openCard(w);
+  const text = panelOf(w).textContent;
+  assert.match(text, /Brief built 2026-10-20\./);
+  assert.match(text, /Written by anymem from the memories below\. Each line cites them\./);
+  assert.doesNotMatch(text, /out of date/);
+  // a brief a person wrote, and one that was never built
+  const hand = subjectWorld({ card: { built_at: BUILT, fields: { brief_pinned: { value: "yes", confirmed_at: NOW, source: "user" } } } });
+  await openCard(hand);
+  assert.doesNotMatch(panelOf(hand).textContent, /Written by anymem/);
+  assert.match(panelOf(hand).textContent, /Written by hand/);
+  assert.doesNotMatch(panelOf(hand).textContent, /Brief pinned/, "the pin is not a field in the list");
+  const never = subjectWorld({ card: { built_at: null } });
+  await openCard(never);
+  assert.doesNotMatch(panelOf(never).textContent, /Written by anymem|Brief built/);
+});
+
+test("a stale subject says why in plain words, and an unknown reason is shown as written", async () => {
+  const cases = [
+    ["uncited_number", /out of date, because a line had a number or a date that no cited memory says\./],
+    ["foreign_id", /because a line cited a memory that is not about this subject\./],
+    ["model.fail.3", /because the model did not answer 3 nights in a row\./],
+    ["members_changed", /because members changed\./],
+  ];
+  for (const [reason, re] of cases) {
+    const w = subjectWorld({ card: { status: "stale", built_at: BUILT, stale_reason: reason } });
+    await openCard(w);
+    assert.match(panelOf(w).textContent, re, reason);
+  }
+  const active = subjectWorld({ card: { status: "active", built_at: BUILT, stale_reason: "uncited_number" } });
+  await openCard(active);
+  assert.doesNotMatch(panelOf(active).textContent, /out of date/, "a reason on a subject that is not stale is not shown");
+});
+
+test("a hostile stale reason is shown as text", async () => {
+  const w = subjectWorld({ card: { status: "stale", built_at: BUILT, stale_reason: "<img src=x onerror=alert(1)>" } });
+  await openCard(w);
+  assert.equal(panelOf(w).querySelector("img"), null);
+  assert.match(panelOf(w).textContent, /<img src=x onerror=alert\(1\)>/);
+});

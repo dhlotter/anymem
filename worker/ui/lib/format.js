@@ -12,6 +12,11 @@ export function formatTime(ms) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** 2026-10-17 in the viewer's time zone. Empty text for a missing time. */
+export function formatDate(ms) {
+  return Number.isFinite(ms) ? formatTime(ms).slice(0, 10) : "";
+}
+
 /** "17 Oct" from a YYYY-MM-DD day key. The key is a UTC day and is never moved by the viewer's zone. */
 export function shortDay(key) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key));

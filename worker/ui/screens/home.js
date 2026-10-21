@@ -4,7 +4,7 @@ import { isMissingRoute } from "../lib/api.js";
 import { chartTable, growthBuckets, legend, stackedBars } from "../lib/chart.js";
 import { mountChart } from "../lib/chart-dom.js";
 import { emptyState, icon, memoryLink, originChip, segmented, shareBar, stateMark } from "../lib/components.js";
-import { attempt, notify, onAction, onChange, onSubmit, formValues, show } from "../lib/dom.js";
+import { attempt, notify, onAction, onChange, onSubmit, formValues, show, unsay } from "../lib/dom.js";
 import { against, ago, count, formatNumber, greeting, longDate, percent, shortDay, titleOf, truncate } from "../lib/format.js";
 import { html } from "../lib/html.js";
 import { quietSentence } from "../lib/harness.js";
@@ -273,16 +273,29 @@ export function mount(root, ctx, arg) {
     if (tab === "recall") drawRecalls();
   }
 
-  /** Accept or dismiss one proposal, then read the list again. The sidebar count follows from the changed event. */
+  /** Accept or dismiss one proposal, then read the list again. The sidebar count follows from the changed event. Both buttons of the row stay off while the request is on its way. */
+  const answering = new Set();
   async function decide(el, path, message) {
-    el.disabled = true;
-    if (!(await attempt(status, () => ctx.request(path, { method: "POST", body: { slug: el.dataset.slug } })))) return void (el.disabled = false);
-    dispatchEvent(new Event("anymem:changed"));
-    notify(message);
-    const next = await attempt(status, askedFor);
-    if (next) {
-      view.proposed = next;
-      show(page.querySelector("[data-waiting]"), subjectsWaitingView(next));
+    const slug = el.dataset.slug;
+    if (answering.has(slug)) return; // a double click, or Dismiss after Accept on the same row
+    answering.add(slug);
+    const buttons = [...(el.closest("tr")?.querySelectorAll("button") ?? [el])];
+    for (const b of buttons) b.disabled = true;
+    try {
+      if (!(await attempt(status, () => ctx.request(path, { method: "POST", body: { slug } })))) {
+        for (const b of buttons) b.disabled = false;
+        return;
+      }
+      unsay(status); // an earlier failure is not true any more
+      dispatchEvent(new Event("anymem:changed"));
+      notify(message);
+      const next = await attempt(status, askedFor);
+      if (next) {
+        view.proposed = next;
+        show(page.querySelector("[data-waiting]"), subjectsWaitingView(next));
+      }
+    } finally {
+      answering.delete(slug);
     }
   }
 
