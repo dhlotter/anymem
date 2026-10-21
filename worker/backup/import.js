@@ -10,6 +10,8 @@ import { MEMORY_COLUMNS } from "./export.js";
 const PARALLEL = 10;
 const MAX_ERRORS = 20;
 const LINK_BATCH = 100;
+const MAX_HASH_CHARS = 128;
+const MAX_REASON_CHARS = 64;
 const HASH = /^[0-9a-f]{64}$/;
 const SUBJECT_KINDS = ["person", "pet", "asset", "project", "area", "topic"];
 const SUBJECT_STATUSES = ["proposed", "active", "stale", "retired"];
@@ -134,13 +136,18 @@ async function importSubjects(db, subjects, errors) {
     const scope = s?.scope ?? "shared";
     const fields = jsonColumn(s?.fields, "{}", false);
     const aliases = jsonColumn(s?.aliases, "[]", true);
-    if (!id || typeof s.slug !== "string" || !s.slug || !SUBJECT_KINDS.includes(s.kind) || !SUBJECT_STATUSES.includes(s.status) || !["shared", "private"].includes(scope) || fields === null || aliases === null || !isTime(s.created_at) || !isTime(s.updated_at)) {
-      errors.push({ id, error: "A subject needs id, slug, a kind and status it knows, scope shared or private, fields as a JSON object, aliases as a JSON list, created_at and updated_at." });
+    // The brief columns arrived in 0007. A backup from before has none, which means a brief that was never built.
+    const memberHash = s?.member_hash ?? "";
+    const staleReason = s?.stale_reason ?? "";
+    const builtAt = s?.built_at ?? null;
+    const briefOk = typeof memberHash === "string" && memberHash.length <= MAX_HASH_CHARS && typeof staleReason === "string" && staleReason.length <= MAX_REASON_CHARS && (builtAt === null || isTime(builtAt));
+    if (!id || typeof s.slug !== "string" || !s.slug || !SUBJECT_KINDS.includes(s.kind) || !SUBJECT_STATUSES.includes(s.status) || !["shared", "private"].includes(scope) || fields === null || aliases === null || !briefOk || !isTime(s.created_at) || !isTime(s.updated_at)) {
+      errors.push({ id, error: "A subject needs id, slug, a kind and status it knows, scope shared or private, fields as a JSON object, aliases as a JSON list, created_at and updated_at, and member_hash, built_at and stale_reason when it has them." });
     } else {
       statements.push(
         db
-          .prepare("INSERT OR IGNORE INTO subjects (id, slug, kind, status, scope, fields, aliases, created_at, updated_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM memories WHERE id = ?)")
-          .bind(id, s.slug, s.kind, s.status, scope, fields, aliases, s.created_at, s.updated_at, id),
+          .prepare("INSERT OR IGNORE INTO subjects (id, slug, kind, status, scope, fields, aliases, created_at, updated_at, member_hash, built_at, stale_reason) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM memories WHERE id = ?)")
+          .bind(id, s.slug, s.kind, s.status, scope, fields, aliases, s.created_at, s.updated_at, memberHash, builtAt, staleReason, id),
       );
     }
   }

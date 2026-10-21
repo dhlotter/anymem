@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS link_rejections (
 
 -- A subject is a thing memories are about. Its card is an ordinary memory (id is the card memory id) that holds the brief.
 -- A memory is a member when an about link runs from it to the card. fields is JSON {key: {value, confirmed_at, source}}, aliases a JSON list.
+-- member_hash, built_at and stale_reason are on the updated_at line because that is where ALTER TABLE ADD COLUMN puts them in migration 0007.
 CREATE TABLE IF NOT EXISTS subjects (
   id TEXT PRIMARY KEY,
   slug TEXT NOT NULL UNIQUE,
@@ -103,7 +104,7 @@ CREATE TABLE IF NOT EXISTS subjects (
   fields TEXT NOT NULL DEFAULT '{}',
   aliases TEXT NOT NULL DEFAULT '[]',
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL, member_hash TEXT NOT NULL DEFAULT '', built_at INTEGER, stale_reason TEXT NOT NULL DEFAULT '',
   FOREIGN KEY (id) REFERENCES memories (id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_subjects_kind ON subjects (kind, status);
