@@ -18,7 +18,7 @@ async function decide({ request, env, ctx, now, maxBody, memoryIds }, action) {
   if (!id) throw notFound("No subject with that slug.");
   memoryIds.push(id);
   const before = await subjects.get(id);
-  if (before.status !== "proposed") throw notProposed();
+  // The guarded UPDATE is the only judge of "still proposed", so a read that went stale between two clicks cannot let both through.
   const claim = await env.DB.prepare("UPDATE subjects SET status = ?, updated_at = ? WHERE id = ? AND status = 'proposed'").bind(action === "accept" ? "active" : "retired", now(), id).run();
   if (claim.meta.changes === 0) throw notProposed();
   // A dismissed subject keeps its card (still pending, never shown) and its evidence links, and the slug stays taken so it is not proposed again.

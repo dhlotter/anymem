@@ -56,8 +56,8 @@ for hint in bad:
     clean, _ = cap.screen({**PIP, "subject": hint})
     check("a bad hint is dropped and the memory stays: %r" % (hint,), clean is not None and "subject" not in clean)
 secret_name = "AKIA" + "ABCDEFGHIJKLMNOP"
-clean, _ = cap.screen({**PIP, "body": BODY + " The vet file is " + secret_name[:4] + "-" + secret_name[4:] + " in the drawer.", "subject": {"name": secret_name[:4] + "-" + secret_name[4:], "kind": "topic"}})
-check("a secret shaped name is dropped", clean is not None and "subject" not in clean)
+check("a secret shaped name is dropped, even when the text holds it", cap.clean_subject({"name": secret_name, "kind": "topic"}, "The id is " + secret_name + " in the drawer.") is None)
+check("and a plain name with the same text is kept", cap.clean_subject({"name": "Pip", "kind": "pet"}, "Pip is here") == {"name": "Pip", "kind": "pet"})
 clean, _ = cap.screen({**PIP, "subject": {"name": "  pip  ", "kind": "pet"}})
 check("the name is trimmed and found in any case", clean is not None and clean["subject"] == {"name": "pip", "kind": "pet"})
 
@@ -88,6 +88,13 @@ cap._api = fail(hm_api.NetworkError("timed out"))
 cap.store(cap.screen({**PIP, "subject": HINT})[0])
 saved = hm_offline.failures()
 check("a failed save keeps the hint for the resave", len(saved) == 1 and saved[0]["payload"].get("subject") == HINT)
+hm_offline.clear()
+cap._api = fail(hm_api.ApiError(503, "unavailable"))
+cap.store(cap.screen({**PIP, "subject": HINT})[0])
+check("an API error keeps the hint too", len(hm_offline.failures()) == 1 and hm_offline.failures()[0]["payload"].get("subject") == HINT)
+cap._api = fail(hm_api.NetworkError("timed out"))
+hm_offline.clear()
+cap.store(cap.screen({**PIP, "subject": HINT})[0])
 resent = {}
 hm_api.request = lambda method, path, body=None, timeout=30: resent.update(body=body) or {"ok": True}
 
