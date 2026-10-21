@@ -1,6 +1,6 @@
 # Worker architecture
 
-Version 2.0.8. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
+Version 2.1.0. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
 
 ## Module map
 
@@ -10,12 +10,17 @@ Version 2.0.8. This file says how the Worker is built and why. The routes and se
 | `hosts.js` | The optional `ALLOWED_HOSTS` check. Another host gets a 404 before auth and before any audit write. |
 | `auth.js` | Access JWT check with WebCrypto, bearer and device token check, auth settings. |
 | `http.js` | `HttpError`, JSON replies, bounded body reader, integer query parameters. |
-| `audit.js` | Writes, lists and purges audit rows. |
+| `audit.js` | Writes, lists and purges audit rows. `auditStatement` builds a row without running it, so a caller can put several rows in one batch. |
 | `devices.js` | Device token routes, including `POST /devices/private`. |
 | `memory/parse.js` | Frontmatter, hashtags, reserved tags, content hash, the 30,000 character limit. Pure, no database. |
-| `memory/store.js` | The storage layer on D1. `createStore(db, now)` gives create, get, getVersion, update, append, setStatus, softDelete, restore, supersede, undo, history, link and list. |
+| `memory/store.js` | The storage layer on D1. `createStore(db, now)` gives create, get, getVersion, update, append, setStatus, softDelete, restore, supersede, undo, history, link and list. `update` also takes a version reason, extra statements that join the same batch, and a quiet flag that skips the read of the new state, which the brief step uses. |
 | `subjects/store.js`, `subjects/routes.js` | Subjects: the store (create, update, get, list, field checks) and the handlers for `/subject`, `/subject/update`, `/subjects`. See "Subjects" below. |
 | `subjects/private.js` | The one place that decides which memories and subjects a device kept from private subjects may not see. |
+| `subjects/auto.js` | `autoOn(env)`, the flag check every automatic subject step starts with. |
+| `subjects/assign.js`, `subjects/after.js`, `subjects/assign-routes.js` | Assignment. `assign.js` decides which subjects a memory is about, `after.js` writes the links and the audit rows after a write, and `assign-routes.js` is `GET /admin/subjects/assign-preview`. See "Assignment" below. |
+| `subjects/hint.js`, `subjects/propose.js`, `subjects/proposal-routes.js` | Proposals. `hint.js` checks the extractor's subject hint, `propose.js` makes a proposed subject, and `proposal-routes.js` holds `POST /subject/accept` and `POST /subject/dismiss`. See "Proposals" below. |
+| `subjects/brief.js` | The brief of a subject. `memberHash` hashes the members a brief was built from. `buildBrief` asks the small model for the lines, with the members as data. `checkBrief` refuses a brief that fails one of the checks. `renderBrief` writes the card text. |
+| `subjects/cluster-routes.js` | `GET /admin/subjects/cluster-preview`. |
 | `memory/diff.js` | The one line summary of what a version changed, used by history. |
 | `memory/routes.js` | The handlers for `/entry`, `/list`, `/history`, `/update`, `/append`, `/status`, `/forget`, `/restore`, `/undo`, `/link`, `/unlink`, `/links`. |
 | `search/chunk.js` | Cuts a memory into chunks (1,600 characters, 200 overlap, at paragraph, sentence or word breaks), builds the search keys, and makes the vector ids. |
@@ -37,7 +42,7 @@ Version 2.0.8. This file says how the Worker is built and why. The routes and se
 | `extract/extract.js` | `POST /extract`: strip our blocks, ask the model, screen every proposal. Stores nothing. |
 | `limits.js` | The write limit and the model call limit on `write_counter`. |
 | `counters.js` | Daily counters on `counters`, collected and written in one batch, read by `/stats`. |
-| `harnesses.js` | The list of harness ids, aliases and proper names, and the label rules (Imported or Unknown for a blank harness, by origin). The client keeps the same list in `client/hm/harnesses.py` and a test in each language fails when they differ. |
+| `harnesses.js` | The list of harness ids, aliases and proper names, and the label rules (Imported or Unknown for a blank harness, by origin, and Anymem for the `system` caller of the Worker's own background work). The client keeps the same list in `client/hm/harnesses.py` and a test in each language fails when they differ. |
 | `outcomes.js` | The `X-Anymem-Outcomes` header. Parses `injected=2,quiet=5` and adds it to the counters `hook.recall.<word>.<harness>`. |
 | `ai.js` | `askJson` (one JSON mode call to the small model, null on any failure) and `asData` (text into a prompt with tags removed). |
 | `capsule.js` | The core capsule: build from memories, cache in `capsule_cache`, ETag, `GET /prompt-capsules/core`, and `onChange` which drops the cache. |
@@ -53,11 +58,14 @@ Version 2.0.8. This file says how the Worker is built and why. The routes and se
 | `cron/maintenance.js` | The nightly job and `POST /admin/run-maintenance`. The step list and the `runs` row, see "Nightly job" below. |
 | `cron/budget.js` | The time and subrequest budget of a step, and `countedEnv` which counts every binding call against it. |
 | `cron/purge.js`, `cron/indexing.js`, `cron/merge.js`, `cron/probation.js` | The steps themselves. |
+| `cron/cluster.js` | The nightly clustering step. Exports `clusterStep` and the grouping the preview route reuses. See "Clustering" below. |
+| `cron/briefs.js` | The nightly brief step. Exports `briefsStep`. See "The brief step" below. |
 | `backup/export.js`, `backup/import.js`, `backup/backup.js` | Export format v2, its importer, the R2 backup and the routes `GET /export`, `GET /backup`, `GET /backup/<day>`, `POST /backup/run`. |
 | `search/probe.js` | `POST` and `GET /vectorize-probe` for the skill's `doctor.py --probe`. |
 | `scripts/set-lifecycle.js` | Development tool, not part of the Worker. Sets the R2 lifecycle rule for `backups/`. `setup.py` sets the same rule itself. |
 | `migrate.js` | Applies `db/migrations` over the D1 REST API. Not part of the Worker. `setup.py` does the same itself. |
 | `db/schema.sql`, `db/migrations/` | The schema. A change is a new numbered migration, and `schema.sql` is updated to match. |
+| `db/migrations/0007_subject_briefs.sql` | `member_hash`, `built_at` and `stale_reason` on `subjects`. |
 | `test/helpers/` | Fakes for D1, Vectorize, AI and R2, a JWT minter, and `createApp()`. |
 
 ## Adding a route
@@ -156,7 +164,7 @@ credentials.
 | `ui/lib/components.js`, `dom.js` | Shared view pieces and the DOM glue (event delegation with `data-action`, no inline handlers) |
 | `ui/lib/grid.js` | The table header kit shared by Memories, Audit, Trash and Activity. A funnel in a column header opens that column's choices as a menu, a sort button, and the chips for the filters in use. The menus use the browser's popover so a scrolling table cannot clip them |
 | `ui/lib/drawer.js` | The memory drawer, with every action it offers. Every screen that lists memories mounts it and gives it where closing goes. The address holds the open memory, for example `#/trash/<id>` |
-| `ui/screens/home.js` | `#/home`. `/ui/api/home`, `growth`, `recalls`, `probation` and `/list` |
+| `ui/screens/home.js` | `#/home`. `/ui/api/home`, `growth`, `recalls`, `probation`, `/list` and `/subjects?status=proposed` for the Subjects waiting for you list, whose Accept and Dismiss call `POST /subject/accept` and `POST /subject/dismiss` |
 | `ui/screens/search.js` | `#/search`. `GET /recall?explain=1&checks=1&count=0`, and the text the hook would add |
 | `ui/screens/memories.js` | `#/memories` and `#/memories/<id>`. `GET /list` with filters and sort. The drawer (`lib/drawer.js`) uses `/entry`, `/history`, `/ui/api/memory-extras`. Edit with `if_updated_at`, append, status, link, undo, forget, restore. A lost race shows a clear message and a reload button |
 | `ui/screens/activity.js` | `#/activity`. `GET /ui/api/activity`, undo through `POST /undo` |
@@ -173,7 +181,7 @@ All of these are `GET` and write nothing but their own audit row. Most need the 
 | Route | Reply |
 |---|---|
 | `GET /ui/api/overview` | Everything `/stats` returns, plus `now`, `by_project`, `by_kind`, `by_type`, `pending`, `trash` (forgotten in the last 14 days), `vectors` (`{count, dimensions}` when Vectorize reports it), `capture` (whatever `/stats` carries under `capture`, else null). |
-| `GET /ui/api/home` | `{owner, headline, nav, checks, summary}`. `headline` has the live count, memories saved this week and the week before, memories recalled this week, recall calls from machines this week and before, and memories closed by the system this week and before. `nav` has the numbers beside the sidebar items, and the capsule cap. `checks` are `{id, label, state, detail, href}` with state `ok`, `warn`, `fail` or `off`, worked out in `dashboard-status.js` |
+| `GET /ui/api/home` | `{owner, headline, nav, checks, summary}`. `headline` has the live count, memories saved this week and the week before, memories recalled this week, recall calls from machines this week and before, and memories closed by the system this week and before. `nav` has the numbers beside the sidebar items, and the capsule cap. `nav.subjects_proposed` is the number of subjects whose status is `proposed` and whose card is not in the trash. `nav.pending`, the changes waiting for you, leaves out any pending memory tagged `subject`, because a proposed subject has a pending card and that card is counted under Subjects. `checks` are `{id, label, state, detail, href}` with state `ok`, `warn`, `fail` or `off`, worked out in `dashboard-status.js` |
 | `GET /ui/api/growth?days=30\|90\|365` | Memories saved per day (per week for a year), counted by origin, every bucket present |
 | `GET /ui/api/recalls` | Recall calls from machines per day for 30 days with how many returned no memory, the count by harness, the most recalled memories used in the last 30 days, and the memories older than a week that were never recalled |
 | `GET /ui/api/probation` | Captures on probation with `days_left`, `recall_count`, `retires` (false for a memory the nightly job never retires, such as a pinned or canonical one) and `retire_at` for one nobody recalled |
@@ -181,7 +189,7 @@ All of these are `GET` and write nothing but their own audit row. Most need the 
 | `GET /ui/api/runs?n=` | The latest runs with each step as `{name, state, headline}` |
 | `GET /ui/api/usage` | Database size, vector counts and stored dimensions against `plan-limits.js`, the write limit by token, and the capture counters per day for 14 days |
 | `GET /ui/api/audit-facets?days=` | The harnesses and routes seen lately with counts, and the calls per day |
-| `GET /ui/api/people` | `{ok, profile, people, pending, pending_total}`, full entries. Pending are `status: pending` memories of origin profile or person, or tagged `profile-proposal`, at most 500 of them, and `pending_total` is the same count as the Home badge. |
+| `GET /ui/api/people` | `{ok, profile, people, pending, pending_total}`, full entries. Pending are `status: pending` memories of origin profile or person, or tagged `profile-proposal`, but never one tagged `subject`, at most 500 of them, and `pending_total` is the same count as the Home badge. |
 | `GET /ui/api/token-expiry` | `{ok, configured, expires, days_left, warn}` from `ACCESS_TOKEN_EXPIRES` (a date). `warn` is true at 30 days or fewer. |
 | `GET /ui/api/memory-extras?id=` | `{ok, probation_until, purge_at, links: [{direction, id, type, name, created_at}], saved_by, recalled_by, recall_log_since}`. The entry does not carry these. `saved_by` is `{at, by, kind, script}` found in the audit trail by the memory's creation time, null when the trail does not hold the save, and left out for a device token. `recalled_by` is `[{harness, label, times}]` from `recall_log` and `recall_log_since` the oldest row there. |
 | `GET /ui/api/harnesses` | `{ok, now, days, sources, recalls, used, outcomes}`, see "Harness views". `used.by_harness[].top` ranks inside each tool, three per tool. |
@@ -217,6 +225,8 @@ audit write is logged without detail and never changes the reply. The row holds 
 script from the `X-Anymem-*` headers (letters, digits and `._:-` only, 64 characters at most), method, the path without the
 query string, status, duration and memory ids. It never holds content, a token or a query string. The nightly job deletes
 rows older than 90 days.
+
+The Worker's own background work writes audit rows too, and its `actor_kind` is `system`. The `actor_id` is the step (`assign`, `propose`, `cluster` or `brief`), the `method` is `SYSTEM`, and the `route` is the action, such as `assign.link`, `assign.ambiguous`, `propose.subject`, `cluster.propose`, `brief.build` or `brief.retire`. They are not requests, so they have no duration. The `script` column says how the action was decided, for example `how:alias.conf:1.0`. The assignment rows carry the harness `system`, which the dashboard names Anymem, so `?harness=system` and `?actor=assign` find them. The proposal, cluster and brief rows have a blank harness, which the dashboard shows as Unknown. They keep the same 90 days.
 
 ## Decisions to keep in mind
 
@@ -281,16 +291,73 @@ rows older than 90 days.
 
 ## Subjects
 
-A subject is a thing memories are about: a person, pet, asset, project, area or topic. This part is subjects made by hand. Nothing assigns memories to them yet.
+A subject is a thing memories are about: a person, pet, asset, project, area or topic. A person makes a subject by hand. With `SUBJECTS_AUTO` on, the Worker can also link memories to subjects, propose subjects and build briefs by itself, which the parts below describe. Those parts do nothing while the switch is off.
 
 1. A subject is a row in `subjects` plus a card, an ordinary memory with the same id. The card holds the brief. It is made through the memory store with origin `system`, type `project`, and the tags `subject`, `subject:<slug>` and `subject-kind:<kind>` (`kind:` is a reserved tag prefix, so the kind tag has another name). Its content is a frontmatter note: name is the slug, description is `<kind> card for <display name>`, the body is the brief. The display name is read back from that description, so it has no column. A card is searchable and versioned like any memory, and only the admin token or a browser login can write one (a device token cannot write origin `system`).
-2. The row holds `slug` (unique, 2 to 40 characters of lowercase letters and digits with single dashes), `kind`, `status` (`proposed`, `active`, `stale`, `retired`), `scope` (`shared` or `private`), `fields` and `aliases` as JSON, and the two times. A subject made by hand starts `active`. `proposed` and `stale` are for later automatic work, and `POST /subject/update` refuses them. Deleting the card cascades to the row, so the trash purge needs no step of its own.
+2. The row holds `slug` (unique, 2 to 40 characters of lowercase letters and digits with single dashes), `kind`, `status` (`proposed`, `active`, `stale`, `retired`), `scope` (`shared` or `private`), `fields` and `aliases` as JSON, and the two times. A subject made by hand starts `active`. `proposed` is for a subject the system suggested and `stale` is for a subject whose last brief failed a check. `POST /subject/update` refuses both, and a proposed subject is decided only through `POST /subject/accept` and `POST /subject/dismiss`. Bringing a retired subject back to `active` with `POST /subject/update` also makes its card memory active when the card is still pending, so a dismissed proposal that comes back is offered by recall again. Deleting the card cascades to the row, so the trash purge needs no step of its own.
 3. `fields` is `{key: {value, confirmed_at, source}}` with `source` `user` for a value a person set. The keys each kind may hold are `FIELD_KEYS` in `subjects/store.js`. Another key is 400 `bad_field`, and a value is a string of 1 to 200 characters. A person has no health or money key. An update merges: a string sets and confirms the key again, `null` removes it. `aliases` are lowercase names, an update replaces the list, at most 20. The brief and every field value go through the same secret screen as an explicit write.
 4. A memory is a member when an `about` link runs from it to the card (`POST /link`). Members are live memories, newest change first, and `GET /subject` returns at most 200 while `member_count` is the real number. A subject whose card is in the trash is a 404 until the card is restored, and its slug stays taken.
 5. A new brief or name writes a new version of the card through `store.update` (reason `update`), so `/history` and `/undo` work on the card. An undo of the card does not change the subject row, so after one the brief shown by `/subject` follows the card and the name follows its description.
 6. `devices.allow_private` (default 1) says whether a device token may see private subjects. `POST /devices/private` sets it, admin token only. The rule that uses it lives in `subjects/private.js` and exports `hiddenIds`, `canSee` and `visibleOnly`: a memory is hidden from a device kept from private subjects when it is the card of a private subject, or when it has an `about` link to a private subject and none to a non private one. The admin token and a browser login see everything. `GET /subjects` and `GET /subject` call it, and a hidden subject is a 404, never a 403.
 7. The subject routes audit the card id. The write routes are admin only with browser write. The read routes take any token and a browser login.
 8. The `SUBJECTS` variable (`on` or `off`, default off) turns on subject cards in recall. The subject routes ignore it.
+9. `SUBJECTS_AUTO` (`on` or `off`, default off) is the switch for everything the system does to subjects on its own. `subjects/auto.js` exports `autoOn(env)`, which is true only when `SUBJECTS_AUTO` and `SUBJECTS` are both `on`. Every automatic step asks it first and does nothing when it says no. The admin preview routes and the accept and dismiss clicks do not ask, because they write nothing the system decided or they are the person's own click.
+10. Migration 0007 adds `member_hash` (a hash of the members a brief was built from, empty until built), `built_at` (when the brief was last built, null until then) and `stale_reason` (the check a new brief failed, empty when the subject is not stale). Export and import carry the three columns, and an export from 2.0.8 imports as a subject whose brief was never built.
+
+### Assignment
+
+1. After a write has replied, the write path links the new memory to the subjects it is about. `afterWrite` indexes and classifies, and then calls `afterSubjects` (`subjects/after.js`). That is inside `ctx.waitUntil`, so it adds nothing to the reply. It never throws. A failure bumps the counter `subjects.failed` and is swallowed. It runs for a new memory, and for a capture that updates a memory in place. The update has no neighbours, so only the name match can link it.
+2. `assignMemory` (`subjects/assign.js`) only decides. It returns `{links, ambiguous, ambiguous_ids, skipped}` and writes nothing. `afterSubjects` writes. A profile, person or system memory is never assigned, and neither is a card.
+3. Alias match. The slug (also with spaces for dashes), the name and every alias of an `active` or `stale` subject are looked for in the memory's description and body. Case does not matter. The term must stand as a whole word or phrase, so Pip matches `Pip's` and `Pip,` but not `Pipeline`. A term shorter than 3 characters never matches. A match gives confidence 1.0.
+4. Neighbour vote. Of the 5 nearest neighbours the write already found, if at least 3 are members of the same subject and the nearest of those is at least 0.6 similar, the memory is linked with confidence (votes divided by 5) times that best similarity, rounded to 2 places. A hidden neighbour and a card never count, because the write path removes them before the list is passed on. An alias match for a subject wins over a vote for the same subject.
+5. The floor is 0.5. A link under it is never made. Three votes reach it only when the best similarity is about 0.84 or more.
+6. A memory is never linked to a subject twice, never to a pair in `link_rejections`, and never to itself.
+7. A memory may belong to several subjects. At most 3 are linked, best confidence first, which also keeps the step inside its subrequest budget.
+8. Ambiguity. When two subjects have the same alias and that alias is in the text, neither is linked. A name that only one of them has (Rowan the dog against Rowan Lee) settles the tie for that one. A tied subject is not linked by a vote either. The step writes one audit row, route `assign.ambiguous`, and bumps `subjects.ambiguous`.
+9. Private subjects. Assignment may link to them, because scope only says who sees. A device whose private access is off is never linked to a private subject by assignment, so a private subject cannot be inferred from the writer's own memories. The admin token, a browser login and a device with `allow_private` see them as candidates.
+10. Budget. At most 12 subrequests for one memory, counting each D1 call and each batch as one. Deciding costs at most 3 reads (the candidate subjects, the neighbours' memberships, the pairs already linked or rejected). Each link is 2 calls through `store.link`, and the audit rows go in one batch. A memory that makes 3 links and one ambiguity row uses 10.
+11. Every system link writes one audit row, route `assign.link`, with the memory and the card in `memory_ids` and the way it was decided in `script`, as `how:alias.conf:1.0` or `how:vote.conf:0.54`. The column keeps letters, digits and `._:-` only. The Audit screen and `GET /audit` show these rows like any other.
+12. The counters are `subjects.assigned` (one per link), `subjects.ambiguous` and `subjects.failed`.
+13. Undo. A system link is made with `made_by` `system` and a confidence. `POST /unlink` on it removes it and writes a `link_rejections` row, and assignment never makes that link again. A device token cannot remove a system link.
+14. `GET /admin/subjects/assign-preview?days=7&cursor=&limit=3` (admin token only, a device token gets 403) shows what assignment would do and writes nothing. It works whatever `SUBJECTS` and `SUBJECTS_AUTO` say. It pages through live captured and explicit memories of the last `days` days (1 to 365, default 7), newest first, with neighbours from the same search the write uses. A page is at most 4 memories (default 3), so one request stays inside the request's subrequest limit. A larger `limit` is cut to 4 and the reply says `limit`. The reply is `{ok, days, limit, memories: [{id, name, snippet, links: [{slug, confidence, how}], ambiguous, skipped}], next_cursor}`. The snippet is 160 characters on one line. A link a memory already has is not shown again. `scripts/subjects-replay.mjs` walks the pages.
+
+### Proposals
+
+1. A proposal is a subject row with status `proposed` and scope `shared`, plus a card memory with origin `system` and status `pending`. The card holds one line, "Proposed from conversation, waiting for your click." Recall, search, the memory count and the Profile pending list do not see a pending memory, so a proposal is invisible until it is accepted. `GET /recall?subject=` answers 404 for a proposed subject. A slug that exists in any status is never proposed again, and neither is a name an existing subject already answers to as an alias.
+2. `createProposed` in `subjects/propose.js` makes one. It refuses a name that cannot make a slug of 2 to 40 characters, a generic name (a list of more than 80 words such as the, it, user, thing, project, work, home, team, me), a name that holds a secret or reads as an instruction, and a kind outside the list. It writes the card, the subject row and one batch of `about` links from the evidence memories (made_by `system`, with a confidence), then one audit row. The unique slug is the guard when two calls race. The loser gets reason `exists` and its card goes to the trash. A proposal of kind person is allowed and never sets a field.
+3. `proposeFromHint` takes the extractor's hint for one memory. It does nothing unless `autoOn(env)`. The name must be 2 to 60 characters with no control characters, the kind must be one of the six, and the name must stand in the memory's own text as a whole word or phrase (Pip is not found in Pipeline). Only a live capture or explicit memory can be the evidence. At most 25 proposals wait at once, after that a hint is dropped so a flood of captures cannot bury the person. `afterSubjects` calls it only when assignment linked nothing.
+4. The hint is data. `POST /capture` and the extractors keep a hint only when it is well formed, a device token may send one because the Worker makes the proposal and the device does not, and a hint that fails any check is dropped while the memory is saved as usual. `POST /extract` puts the hint on a memory proposal when its name also stands in the proposal's own text.
+5. The audit row of a proposal has actor_kind `system`, actor_id `propose`, method `SYSTEM`, route `propose.subject`, status 200 (500 on a failure) and the card and evidence ids. The script column holds `how:hint.conf:1.0`. The clustering step passes the step `cluster` and gets actor_id `cluster`, route `cluster.propose` and `how:cluster.conf:` followed by the mean confidence.
+6. Accept and dismiss are in `subjects/proposal-routes.js`. Each is one guarded UPDATE that only changes a subject whose status is still `proposed`, so two clicks cannot both win, and anything else is 409 `not_proposed`. Accept sets the subject `active` and then the card memory `active`, and keeps the evidence links. If the brief is still the one line the system wrote, accept clears it with a normal versioned update, so it can be undone. A brief the person edited stays. Dismiss sets the subject `retired` and deletes nothing, so the slug stays taken and the same proposal never comes back.
+
+### Clustering
+
+The cluster step proposes subjects from notes that no subject has claimed yet. It runs before `merge`, see "Nightly job".
+
+1. Which notes. Live captures and explicit notes from the last 90 days that are not cards and have no `about` link to any subject. A note that belongs to a private subject has an `about` link, so it is never a candidate and a proposal never pulls it into a shared subject.
+2. How they are grouped. A shared project, a shared plain tag, or a shared first word of the note name. The tags the system writes itself (`auto-capture`, `captured-by`, `session`, `subject`, `capsule`) never group. A first word under four letters, or a common word such as update or session, never groups. A group name that matches the stop list is dropped as generic. A group needs five notes.
+3. The cohesion check. The step reads the stored vectors of up to the 20 newest notes in a group with one Vectorize `getByIds` call and takes the mean cosine of every pair. Below 0.55 the group is dropped. A group with fewer than five indexed notes waits for the indexer. When the budget cannot pay for the check and the proposal together, the group is dropped and counted as `skipped_budget`. It is never proposed unchecked. At most 6 groups are checked in a night.
+4. The proposal. The name is the tag, word or project slug. A project makes a project proposal, anything else a topic. The step calls `createProposed` with the checked notes as evidence, each with the cohesion as its confidence. At most 3 proposals a night. The slug must not exist in any status, and no existing alias may match it, so a dismissed proposal does not return.
+5. The summary. The step reports `memories`, `groups`, `checked`, `proposed`, `slugs`, `skipped_budget`, `failed`, and a count of dropped groups by reason (`exists`, `generic`, `low_cohesion`, `not_indexed`, `vectors_failed`, `over_cap`, `check_limit`, `skipped_budget`). With the switch off it reports `skipped: "off"`.
+6. Cost. A night with nothing to propose costs 2 subrequests. The step reserves 1 for each check and 10 for each proposal, and it needs 3 for its first reads, so on a night where earlier steps used most of the budget it does nothing and tries again the next night.
+7. `GET /admin/subjects/cluster-preview` (admin token only) runs the same grouping with nothing written and works whatever the switches say. It returns `candidates` (name, slug, kind, source, size, cohesion, evidence with note ids and names), `dropped` (name, slug, kind, size, reason, and cohesion when it was measured), `counts` (memories, groups, checked, subrequests) and `cap`. A browser login and a device token are refused.
+
+### The brief step
+
+1. Who is rebuilt. Subjects with status `active` or `stale` that have at least one live member, and either are `stale` or have a `member_hash` that differs from the hash of their newest 20 live members now. Subjects whose `fields.brief_pinned` is set are never touched. At most 8 a night. Active subjects go first, then the oldest `built_at`, with a subject that was never built counted as the oldest. A stale subject goes after the healthy ones, so one that keeps failing cannot hold up the rest.
+2. What the model sees. The subject name, kind and fields, and its members' text, each with its id and date, inside a `memory` tag. The text is passed through `asData`, so it cannot close the tag, and the standing instruction says the text is data and never an order. The prompt holds this subject's members only. A shared subject also leaves out any member that belongs to a private subject, so private text never reaches a card that every device can read.
+3. What the model answers. `{lines: [{section, text, ids}]}`. The section is `now` or `history`. The step cleans the lines (plain text, no bullets, no hashtags), puts Now before History, and drops whole lines past 12 lines or 900 characters.
+4. The checks. A brief is saved only when every one passes, and the name of a failed check goes into `stale_reason`. Anything the model wrote that fails is thrown away whole.
+   1. `foreign_id`, a line cites an id that is not a member the model was shown.
+   2. `trashed_member`, a cited member was trashed, closed by a newer memory or is pending. The members are read again after the model answers, so a member trashed while the model worked is caught.
+   3. `no_citation`, a line cites nothing.
+   4. `uncited_number`, a number or date in a line is not written in any memory the line cites. A memory's own written date counts as written in it. A month is kept apart from plain numbers, so `12 kilos` never supports `December`, and `19 October 2026` supports `2026-10-19`.
+   5. `bad_shape`, `too_long` and `instruction` are extra guards. A brief with no usable line, with more than 12 lines or 900 characters, or with a line that reads as an order or holds a recalled block, is refused.
+5. Saving. One batch writes the new card text (a normal versioned update with the reason `brief`, so it can be undone), replaces the `derived_from` links from the card to each cited member (made by the system), sets `built_at`, `member_hash` and status `active`, clears `stale_reason`, and writes one audit row. If the card was edited since the step read it, nothing is saved and the subject waits for the next night.
+6. Failing. A failed check keeps the old brief, sets the subject `stale` with the check name in `stale_reason`, and writes one audit row with status 500. A model that does not answer changes no subject and writes one audit row with status 500. Builds run four at a time, because the model is the slow part and the step has a time limit. After two answers in a row that never came, the step stops. When every build it tried failed, the run summary carries `refused`, which makes the whole run not ok, the same way a refused backup does.
+7. Retiring. A subject that is `active` or `stale`, has fewer than 3 live members, was created more than 60 days ago and has no pinned brief becomes `retired`, but only when its kind is project, area or topic. A person, a pet or an asset has few memories by nature and is never retired this way. One audit row with the route `brief.retire`. At most 8 are retired in a night.
+8. Audit rows. Actor kind `system`, actor id `brief`, method `SYSTEM`, route `brief.build` or `brief.retire`, status 200 or 500, the card id and the cited ids in the memory ids. The script column says how it was decided, for example `how:model.lines:5` or `how:check.uncited.number`.
+9. Cost. A night with nothing to do costs 1 subrequest. A build costs at most 4 (the model, a fresh read of the members, and the card update with its batch), a failed check costs less, and the two reads that open the step cost 2 more. A night with 8 builds costs 34, so it fits the 40 of the default budget on its own. At the default time limit of 20 seconds the model is more likely to end the step than the subrequests are, and what is left waits for the next night. Every build checks the shared budget first, so the step never goes over it.
 
 ### The private rule
 
@@ -426,7 +493,7 @@ What the numbers say, and the limits. The gate margins are one prompt wide. Of t
 
 ## The write pipeline
 
-`POST /capture {content, tags?, project?, source?, origin?, harness?, session?}` runs `write/pipeline.js`. The order matters.
+`POST /capture {content, tags?, project?, source?, origin?, harness?, session?, subject?}` runs `write/pipeline.js`. `subject` is the extractor's hint `{name, kind}`, kept only for a capture or explicit write and only when `subjects/hint.js` finds it well formed. The order matters.
 Origin comes from `origin`, else from `source` (`session-capture` is capture, `claude` explicit, `profile`, `person`), else explicit.
 `/import` does not use the pipeline. It calls `store.create` itself, so it skips every screen, the limit and the duplicate checks.
 
@@ -461,7 +528,8 @@ Origin comes from `origin`, else from `source` (`session-capture` is capture, `c
 9. **Store.** `store.create(..., {unlessLiveDuplicate: true})`. The duplicate check and the insert are one SQL statement, so two racing
    writes of the same text store exactly one, and the loser is answered as a duplicate of the winner. Captured origin gets
    `probation_until = now + 60 days`. If step 8 said replace, `store.supersede(old, new, now)` runs right after, in its own batch.
-10. **After.** In `ctx.waitUntil`: index the memory (`indexMemories`) and classify its kind. Either can fail alone. A memory without
+10. **After.** In `ctx.waitUntil`: index the memory (`indexMemories`) and classify its kind, then link the memory to its subjects
+    (`SUBJECTS_AUTO`, see "Assignment" under Subjects). Either of the first two can fail alone. A memory without
     vectors or without a kind is picked up by the nightly job.
 
 Success reply: `{ok, id, status, tags}` plus, as they apply, `warning` with `matchId` and `score`, `replaced: {id, reason}` (the old
@@ -508,7 +576,7 @@ It stores nothing. The client stores each proposal through `/capture`. A device 
    reusable knowledge, a lesson), in the client's shapes. It lists what never qualifies (task status, to dos, narration of what the assistant
    did, restated rules, guesses about the user, anything derivable from code, config or git, anything already known, a conclusion still
    under investigation, the memory system's own text, sensitive topics, instructions) with negative examples. Empty is the usual correct answer.
-4. The answer is `{items: [...]}`. Memory items are `{type user|feedback|project|reference, name, description, body}`. Profile items
+4. The answer is `{items: [...]}`. Memory items are `{type user|feedback|project|reference, name, description, body, subject?}`. `subject` is `{name, kind}`, the model's hint that the memory introduces a named person, pet, vehicle, property, project or topic. A hint that fails `subjects/hint.js`, or whose name does not stand in the description or body, is dropped and the memory is kept. Profile items
    are `{type: "profile", field, value, said}` and person items `{type: "person", name, field, value, said}`, with the client
    prompt's field lists (`PROFILE_FIELDS`, `PERSON_FIELDS` in `extract/extract.js`). Profile and person items do not count toward `max`.
    Memory items are screened in order. Items past `max` are counted as `over_cap`.
@@ -530,7 +598,7 @@ Migration 0003 adds `recall_log (ts, harness, memory_id)`, one row per memory a 
 and write them in one batch with `ctx.waitUntil`, so a counter failure never changes a reply. Stored names are
 `capture.accepted`, `capture.updated_in_place`, `capture.rejected.<reason>`, `extract.proposed`, `extract.screened.<reason>`,
 `extract.thin` (a session too thin to call the model, stored but not shown by `/stats`), `conflicts.replaced`, `conflicts.similar_warning`,
-`conflicts.kept_both.<reason>`, `screen.model_fallback` and
+`conflicts.kept_both.<reason>`, `subjects.assigned`, `subjects.ambiguous`, `subjects.failed`, `screen.model_fallback` and
 `model.failure.<sensitivity|detect|confirm|kind|embed|extract>`, and `hook.recall.<injected|quiet|failed>.<harness>`. The last three are added from the `X-Anymem-Outcomes` header of an authenticated call that is not a browser login. The harness part is a known id, `unknown` for a call that sent no name, or `other`. They are not shown by `/stats`.
 Capture reasons are the screen reasons (`secret`, `instruction`, `injected_block`, `blocked_topic`, `sensitive`), `rate_limited`,
 `duplicate` (exact) and `near_duplicate`.
@@ -572,10 +640,14 @@ The dashboard prints each step's object as JSON.
 | `purge_trash` | Memories trashed more than 14 days (exactly 14 days stays). Deletes rows, tags, keys, links, link rejections, versions, FTS rows and the vectors (ids worked out from the key rows). | 4 per 100 memories |
 | `reindex` | `reindex()` in batches of up to 50, sized from what is left. | about n + 8 |
 | `classify` | `classifyKind` for live memories with no kind, 4 at a time. Gives up after the first group fails. | 3 each |
+| `cluster` | Proposes subjects from live captures and explicit notes of the last 90 days that no subject has claimed, at most 3 a night. Does nothing unless `SUBJECTS_AUTO` and `SUBJECTS` are both `on`, and then reports `skipped: "off"`. See "Clustering" under Subjects. | 1 per group checked, 10 per proposal, 2 for a night with nothing to propose |
+| `briefs` | Rebuilds the brief of a subject whose members changed, at most 8 a night, and retires a project, area or topic with fewer than 3 live members that is over 60 days old. Does nothing unless `SUBJECTS_AUTO` and `SUBJECTS` are both `on`. See "The brief step" under Subjects. | 4 per build, 1 for a night with nothing to do |
 | `merge` | Live captures from the last 14 days that are not pinned, not canonical and not pending. Neighbours come from `write/neighbours.js` at 0.90 similarity or more with a word overlap of 0.45 or more (shared words over all the words of both), and must be older live captures of the same project, not pinned, not canonical and not pending. The newer one closes into the older with `store.supersede(..., "merge")`. When the vector search finds nothing, an older live capture with exactly the same name and a word overlap of 0.85 is the fallback. A cursor in `meta.merge_cursor` keeps the place, oldest first, and is cleared when a sweep ends. | measured from the candidates before it, 10 until one is measured |
 | `probation` | Captures only. A recalled one whose `probation_until` is in the past loses it. Never recalled and 60 days old (or more) goes to the trash. Type project with no recall for 90 days (`last_recalled_at`, else `created_at`) goes to the trash. Explicit, profile, person, system, import, pinned and canonical memories are never retired. Versions are written with the reasons `retire_never_recalled` and `retire_idle_project`. | 3 per retirement |
 | `purge_old` | Counters, audit rows and recall log rows older than 90 days, and the last doctor probe vector. | 4 |
 | `token` | Days left on `ACCESS_TOKEN_EXPIRES`. | 0 |
+
+The two subject steps run before `merge`, in the order `cluster`, `briefs`, `merge`, because merge keeps going until the shared subrequest budget is gone. A step placed after merge could find the budget already gone.
 
 Ending probation only sets a column, like `kind`, so it writes no version and does not touch `updated_at`.
 Retirements go through `store.softDelete`, so they keep a version and the memory can be restored for 14 days.

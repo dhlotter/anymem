@@ -89,6 +89,8 @@ Two logs, one on each side. Neither holds memory text, a prompt, a token or a qu
 
 Two small things ride along with a client request. A hook may send `X-Anymem-Outcomes` (for example `injected=2,quiet=5`), three words and counts that say what the recall hook did with its prompts. The Worker adds them to daily counters per harness and keeps nothing else from the header. A counted recall (`GET /recall` with `count=1`) writes one row per relevant memory to `recall_log` with the time and the harness, for 90 days. Neither holds a query, a prompt or memory text.
 
+The Worker's own background work writes rows too. Their actor kind is `system`, the actor id is the step (`assign`, `propose`, `cluster` or `brief`), the method is `SYSTEM` and the route is the action, such as `assign.link` or `brief.build`. They have no duration, they hold no memory text, and the script column says how the action was decided, for example `how:alias.conf:1.0`. Every link or proposal the system makes has one, so you can see what it did and when.
+
 Read it with `GET /audit` (admin token) filtered by `since`, `until`, `actor` and `route`, paged by `cursor`, or on the dashboard's Audit screen. The Worker's rows and the local lines can be matched by time and route.
 
 ## Memories are data, not instructions
@@ -101,7 +103,8 @@ Capture reads a transcript, so it reads text written by web pages, files and too
 4. **Policy is not in the transcript.** Whether capture runs, and which folders and sessions are excluded, come from the config file and the environment only.
 5. **Provenance.** Each memory stores its origin, harness and session. Each recall hit carries its origin, project and timestamps.
 6. **Capture is narrow.** The capture hook only calls `POST /capture` with fixed tags, so it cannot edit the capsule, forget a memory or change a status. A different value for a profile fact that already has one becomes a pending change that waits for you.
-7. **Screens are filters, not guarantees.** A hostile line the screens miss can become a memory that is injected into later prompts. Probation, the nightly merge and `forget.py` limit that, and the weekly line at session start makes new captures visible.
+7. **A subject hint is data too.** The extractor may name a subject, and a device token may send that hint, but the hint only makes a proposal that waits for your click. It is checked for secrets, instructions and our own injected blocks, its name must appear in the memory's own text, and the Worker never runs it as an instruction. A proposal is invisible to recall until you accept it.
+8. **Screens are filters, not guarantees.** A hostile line the screens miss can become a memory that is injected into later prompts. Probation, the nightly merge and `forget.py` limit that, and the weekly line at session start makes new captures visible.
 
 The screens, in order, are in [capture](capture-design.md). Size limits apply to every input. A memory is at most 30,000 characters, a request body at most 1,000,000 bytes (10 MB for an import page), and each device token gets 40 writes in 10 minutes across every write route. The admin token and a browser login are not limited, except on `/capture`, which counts every caller.
 
