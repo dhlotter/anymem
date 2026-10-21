@@ -930,7 +930,8 @@ test("a stale subject says why in plain words, and an unknown reason is shown as
     ["uncited_number", /out of date, because a line had a number or a date that no cited memory says\./],
     ["foreign_id", /because a line cited a memory that is not about this subject\./],
     ["model.fail.3", /because the model did not answer 3 nights in a row\./],
-    ["members_changed", /because members changed\./],
+    ["members_changed", /because its memories changed, so the old brief was cleared until it is rebuilt\./],
+    ["unbacked_claim", /because a line said something its cited memories do not back up\./],
   ];
   for (const [reason, re] of cases) {
     const w = subjectWorld({ card: { status: "stale", built_at: BUILT, stale_reason: reason } });
