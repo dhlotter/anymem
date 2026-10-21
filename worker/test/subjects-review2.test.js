@@ -12,7 +12,7 @@ import { createProposed } from "../subjects/propose.js";
 import { createApp } from "./helpers/app.js";
 import { DAY, indexAll, row, rows, seed, storeOf } from "./helpers/maintenance.js";
 import { about, addSubject, device } from "./helpers/subjects.js";
-import { put, QUIET, scriptModel } from "./helpers/write.js";
+import { NEW_FACT, NEW_WINS, OLD_FACT, put, QUIET, scriptModel } from "./helpers/write.js";
 
 const ALL = { SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_BRIEFS: "on" };
 const SECRET = "Dana stays at the cottage when she is sick.";
@@ -120,23 +120,37 @@ test("forgetting the member blanks every brief that cites it at once, for a pinn
   }
 });
 
-test("a memory that replaces the cited one blanks the brief at once (the write path)", async () => {
+test("a capture that replaces the cited memory blanks the brief in the same request (the write path)", async () => {
   const app = await createApp({ env: ALL });
-  scriptModel(app.env.AI, { ...QUIET, "contradiction-detect": { match: 0 } });
-  const cottage = await addSubject(app, { slug: "cottage", kind: "asset", name: "Cottage" });
-  const m = await seed(app, { name: "cottage-note", text: SECRET, origin: "capture" });
-  await about(app, m, cottage);
-  const cited = await seed(app, { name: "cottage-note-2", text: "The cottage roof leaks over the kitchen.", origin: "capture" });
-  await about(app, cited, cottage);
-  model(app);
+  const answers = { ...QUIET, "contradiction-detect": { match: 1 }, "contradiction-confirm": NEW_WINS };
+  scriptModel(app.env.AI, answers);
+  const staging = await addSubject(app, { slug: "staging", kind: "project", name: "Staging" });
+  const old = (await put(app, OLD_FACT)).json.id;
+  await about(app, old, staging);
+  model(app); // the brief is built by the small model too
   app.clock.t += 1000;
-  await night(app);
-  assert.match((await row(app, cottage)).body, /roof leaks/);
-  // replacing goes through the store the same way the write path does it, and the helper is what the write path calls
-  await storeOf(app).supersede(cited, m, app.clock.t);
-  const done = await clearCiting(app.env, { ids: [cited], now: () => app.clock.t, why: "member.gone" });
-  assert.deepEqual(done, [cottage]);
-  assert.equal((await row(app, cottage)).body, "");
+  assert.equal((await night(app)).built, 1);
+  assert.match((await row(app, staging)).body, /port 8080/);
+  scriptModel(app.env.AI, answers);
+  app.clock.t += 1000;
+  const res = await put(app, NEW_FACT);
+  assert.deepEqual(res.json.replaced, { id: old, reason: "contradiction" });
+  assert.equal((await row(app, staging)).body, "", "the brief that cited the replaced memory is gone with it");
+  assert.equal((await derived(app, staging)).length, 0);
+  assert.equal((await subjectRow(app, staging)).stale_reason, "members_changed");
+});
+
+test("the nightly backup blanks a pinned brief and a retired subject's brief too, when a cited memory is gone", async () => {
+  for (const mode of ["pinned", "retired"]) {
+    const { app, cottage, m, closed } = await world();
+    if (mode === "pinned") await app.env.DB.prepare("UPDATE subjects SET fields = ? WHERE id = ?").bind(JSON.stringify({ brief_pinned: { value: "yes", confirmed_at: 1, source: "user" } }), cottage).run();
+    if (mode === "retired") await app.env.DB.prepare("UPDATE subjects SET status = 'retired' WHERE id = ?").bind(cottage).run();
+    await createStore(app.env.DB, () => app.clock.t).softDelete(m);
+    assert.match(await everything(app, closed, cottage), /Dana stays/, "before the night the text is still readable");
+    app.clock.t += DAY;
+    assert.equal((await night(app)).cleared, 1, mode);
+    assert.doesNotMatch(await everything(app, closed, cottage), /Dana stays|sick/, mode);
+  }
 });
 
 test("the clear works with SUBJECTS_AUTO and SUBJECTS_BRIEFS off, because the text may have been built earlier", async () => {
@@ -359,7 +373,8 @@ test("accepting a proposal drops the evidence links of a memory that got a priva
   const open = await seed(app, { name: "rowan-b", text: "Rowan the vet is open on Saturdays.", origin: "capture" });
   const made = await createProposed(app.env, { name: "Rowan", kind: "person", evidence: [{ id: hidden, confidence: 1 }, { id: open, confidence: 1 }], now: () => app.clock.t });
   assert.equal(made.ok, true);
-  await about(app, hidden, dana); // the person files it under Dana, who is private
+  // The private link is written straight into the table, the way it stood before a private link took the system's shared links with it.
+  await app.env.DB.prepare("INSERT INTO links (source_id, target_id, link_type, created_at, made_by, confidence) VALUES (?, ?, 'about', ?, 'user', NULL)").bind(hidden, dana, app.clock.t).run();
   assert.equal((await app.call(`/entry?id=${hidden}`, { token: closed.token })).status, 404, "while it is a proposal the memory is hidden");
   assert.equal((await post(app, "/subject/accept", { slug: "rowan" })).status, 200);
   assert.equal((await app.call(`/entry?id=${hidden}`, { token: closed.token })).status, 404, "and after accepting it");
@@ -376,7 +391,7 @@ test("bringing a dismissed proposal back drops the same links, and a plain updat
   const open = await seed(app, { name: "rowan-b", text: "Rowan the vet is open on Saturdays.", origin: "capture" });
   const made = await createProposed(app.env, { name: "Rowan", kind: "person", evidence: [{ id: hidden, confidence: 1 }, { id: open, confidence: 1 }], now: () => app.clock.t });
   await post(app, "/subject/dismiss", { slug: "rowan" });
-  await about(app, hidden, dana);
+  await app.env.DB.prepare("INSERT INTO links (source_id, target_id, link_type, created_at, made_by, confidence) VALUES (?, ?, 'about', ?, 'user', NULL)").bind(hidden, dana, app.clock.t).run();
   assert.equal((await post(app, "/subject/update", { slug: "rowan", status: "active" })).status, 200);
   assert.equal((await app.call(`/entry?id=${hidden}`, { token: closed.token })).status, 404);
   assert.deepEqual((await rows(app, "SELECT source_id FROM links WHERE target_id = ? AND link_type = 'about'", made.id)).map((r) => r.source_id), [open]);

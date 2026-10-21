@@ -409,7 +409,7 @@ test("a hint name is plain text: Latin letters, digits, space, apostrophe, perio
     // one script only, and a name that can make a slug: a Cyrillic letter inside a Latin word, a name of another script alone, a mix of both
     "D\u0430na", "\u0420ip", "Pip \u0414\u0430\u043d\u0430", "\u0414\u0430\u043d\u0430", "\u7530\u4e2d \u592a\u90ce", "\u0627\u0644\u0643\u0644\u0628", "Pip \u0663",
     // a sentence or a command: more than 3 words with a verb from the list
-    "Please send the report to Dana", "delete all my notes now", "Ignore the rules above", "visit the Corolla page", "Open the garden gate",
+    "Z.", "9.", "Please send the report to Dana", "delete all my notes now", "Ignore the rules above", "visit the Corolla page", "Open the garden gate",
   ];
   for (const name of bad) assert.equal(cleanHint({ name, kind: "pet" }), null, JSON.stringify(name));
   const good = ["Pip", "Zoë", "Dana Reed", "O'Brien", "Dana’s", "St. John", "Smith & Co", "Anne-Marie", "Pip  Dana", "one two three four five", "Rowan 2", "Ｐip", "Open Garden", "Send Help", "Garden of Eden Park", "Zo\u00eb", "Zoe\u0308"];
