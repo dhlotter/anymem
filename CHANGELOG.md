@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1] 2026-10-22
+
+The clustering preview on a real store showed two faults, both fixed.
+
+1. **System tags.** The clustering step now ignores `duplicate-candidate`, a tag the capture hook adds when a memory looks like a duplicate. Before, 103 memories sharing it would have been proposed as one subject.
+2. **Two word names.** A group named from the first word of its memory names takes two words when four in five of its memories share the second word as well, so `paper-past-publish-slot` and its neighbours give `paper-past` and not `paper`.
+
 ## [2.1.0] 2026-10-21
 
 Subjects get automatic. The Worker can now link a new memory to the subjects it is about, propose a subject for something new, group loose memories into proposals overnight, and keep each subject's brief up to date. Every one of these automatic actions is behind a new Worker setting, `SUBJECTS_AUTO`, which is off by default. It works only when `SUBJECTS` is on as well. Writing briefs has its own setting, `SUBJECTS_BRIEFS`, also off by default. Nothing automatic runs until you turn it on, and with it off the Worker does what 2.0.8 did. Migration 0007 adds three columns to `subjects`, and a rerun of `setup.py` applies it.

@@ -53,13 +53,23 @@ test("a group of 4 is not proposed", async () => {
 
 test("tags the system writes by itself never group, however many memories share them", async () => {
   const app = await clusterApp();
-  await group(app, { n: 6, topic: "alpha", extraTags: ["auto-capture", "captured-by:codex", "session:1a2b3c4d", "subject:ghost", "subject-kind:pet", "capsule:core"] });
+  await group(app, { n: 6, topic: "alpha", extraTags: ["auto-capture", "captured-by:codex", "session:1a2b3c4d", "subject:ghost", "subject-kind:pet", "capsule:core", "duplicate-candidate"] });
   await indexAll(app);
   const propose = stubPropose();
   const { summary } = await runStep(app, clusterStep, { propose });
   assert.equal(propose.calls.length, 0);
   assert.equal(summary.groups, 0);
   assert.equal((await rows(app, "SELECT COUNT(*) AS n FROM subjects"))[0].n, 0);
+});
+
+test("a group named by a leading word takes two words when 4 in 5 of its memories share the second one", async () => {
+  const app = await clusterApp();
+  await group(app, { n: 5, topic: "paperpast", lead: "paper-past" });
+  await group(app, { n: 5, topic: "corolla", lead: "corolla" }); // the second word is a number, so the name stays one word
+  await indexAll(app);
+  const propose = stubPropose();
+  await runStep(app, clusterStep, { propose });
+  assert.deepEqual(names(propose.calls), ["corolla", "paper-past"]);
 });
 
 test("a shared project makes a project proposal", async () => {
