@@ -2,6 +2,7 @@
 import { cleanLabel } from "../audit.js";
 import { badRequest, flag, forbidden, HttpError, intParam, json, notFound, readJson } from "../http.js";
 import { indexMemories } from "../search/indexer.js";
+import { clearBeforeLink, clearCiting } from "../subjects/clear.js";
 import { canSee, hiddenIds } from "../subjects/private.js";
 import { REASONS, screenExplicit } from "../write/screen.js";
 import { adminHeld, adminOnlyMessage, adminOnlyTags, LINK_TYPES, normalizeTags, RESERVED_LINK_TYPES, STATUSES, TYPES } from "./parse.js";
@@ -157,8 +158,13 @@ const byId = (method) =>
     const id = idOf((await readJson(request, maxBody)).id);
     await guardDevice(c, id, { undo: method === "undo" });
     memoryIds.push(id);
+    // A forget blanks the briefs that cite the memory BEFORE the memory goes, so a failure to blank stops the forget (the person sees the error and can
+    // try again) and never leaves a forgotten memory's text readable in a card. Blanking a brief that is then not needed is harmless, the next build makes it again.
+    if (method === "softDelete") await clearCiting(env, { ids: [id], now, ctx: c.ctx, why: "member.gone", strict: true });
     const entry = await createStore(env.DB, now)[method](id);
     indexLater(c, id);
+    // An undo that closes a memory cannot be known before it runs, so it clears after. A failure is an error for the person, and the nightly step is the backup.
+    if (method !== "softDelete" && (entry.deleted_at !== null || entry.valid_until !== null)) await clearCiting(env, { ids: [id], now, ctx: c.ctx, why: "member.gone", strict: true });
     return json({ ok: true, entry });
   };
 
@@ -190,7 +196,11 @@ export async function link(c) {
   if (RESERVED_LINK_TYPES.includes(type)) throw badRequest(`${type} is written by the system only. Use one of ${LINK_TYPES.filter((t) => !RESERVED_LINK_TYPES.includes(t)).join(", ")}.`, "reserved_link_type");
   await guardDevice(c, source);
   await guardDevice(c, target);
+  // A memory that joins a private subject may no longer feed a brief that every device can read. The shared briefs that cite it are blanked
+  // before the link is stored (a failure stops the link), and once more after it, for a brief that was built in between.
+  const toPrivate = type === "about" && (await clearBeforeLink(env, { source, target, now, ctx: c.ctx }));
   const { created } = await createStore(env.DB, now).link(source, target, type);
+  if (toPrivate) await clearCiting(env, { ids: [source], now, ctx: c.ctx, sharedOnly: true, why: "member.private", strict: true });
   return json({ ok: true, created });
 }
 

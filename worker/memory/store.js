@@ -97,6 +97,17 @@ function decodeCursor(cursor, sort) {
   throw badRequest("cursor is not valid.", "bad_cursor");
 }
 
+/**
+ * Delete the links the system made from a memory to subjects that are not private (a shared subject, or a proposal), when the memory
+ * has just been linked to a private subject. Bind the memory id, the link type ('about' is the only one it does anything for), the
+ * subject the new link points at, and the memory id. It does nothing unless that subject is private, so a link between two memories, or
+ * a link to a shared subject, can never delete anything, whoever makes it.
+ */
+export const SHED_SHARED_SQL = `DELETE FROM links WHERE source_id = ? AND ? = 'about' AND link_type = 'about' AND made_by = 'system'
+  AND target_id IN (SELECT id FROM subjects WHERE scope <> 'private')
+  AND EXISTS (SELECT 1 FROM subjects WHERE id = ? AND scope = 'private')
+  AND EXISTS (SELECT 1 FROM links x JOIN subjects p ON p.id = x.target_id WHERE x.source_id = ? AND x.link_type = 'about' AND p.scope = 'private')`;
+
 const sameSet = (a, b) => a.length === b.length && a.every((t) => b.includes(t));
 
 /**
@@ -125,9 +136,11 @@ export function createStore(db, now = Date.now) {
    * @param {string} reason
    * @param {(cur: any, at: number) => Promise<{set?: Record<string, any>, tags?: string[]} | null>} plan
    * @param {number} [ifUpdatedAt]
+   * @param {{extra?: any[], quiet?: boolean}} [opts] extra statements run in the same batch, or alone when nothing about the memory changes,
+   *   so a caller can save its own rows with the change or not at all. quiet skips the read that returns the new state, for a caller that does not use it.
    * @returns {Promise<Entry>}
    */
-  async function mutate(id, reason, plan, ifUpdatedAt) {
+  async function mutate(id, reason, plan, ifUpdatedAt, { extra = [], quiet = false } = {}) {
     const cur = await load(id);
     if (!cur) throw notFound("No memory with that id.");
     if (ifUpdatedAt !== undefined && ifUpdatedAt !== cur.row.updated_at) {
@@ -137,7 +150,10 @@ export function createStore(db, now = Date.now) {
     const change = await plan(cur, at);
     const set = Object.fromEntries(Object.entries(change?.set ?? {}).filter(([k, v]) => cur.row[k] !== v));
     const tagsChanged = change?.tags !== undefined && !sameSet(change.tags, cur.tags);
-    if (!Object.keys(set).length && !tagsChanged) return toEntry(cur.row, cur.tags);
+    if (!Object.keys(set).length && !tagsChanged) {
+      if (extra.length) await db.batch(extra);
+      return toEntry(cur.row, cur.tags);
+    }
     const columns = [...Object.keys(set), "updated_at"];
     const statements = [
       db.prepare("INSERT INTO memory_versions (memory_id, seq, snapshot, reason, created_at) VALUES (?, ?, ?, ?, ?)").bind(id, cur.seq + 1, JSON.stringify(snapshotOf(cur)), reason, at),
@@ -149,13 +165,14 @@ export function createStore(db, now = Date.now) {
       statements.push(db.prepare("DELETE FROM memory_tags WHERE memory_id = ?").bind(id));
       statements.push(db.prepare("INSERT INTO memory_tags (memory_id, tag) SELECT ?, value FROM json_each(?)").bind(id, JSON.stringify(change.tags)));
     }
-    statements.push(db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").bind(id), db.prepare(FTS_INSERT).bind(id));
+    statements.push(db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").bind(id), db.prepare(FTS_INSERT).bind(id), ...extra);
     try {
       await db.batch(statements);
     } catch (err) {
       if (/UNIQUE constraint failed: memory_versions/.test(String(err?.message))) throw conflict("Another change landed first. Read the memory again and retry.", "lost_race");
       throw err;
     }
+    if (quiet) return null;
     const fresh = await load(id);
     return toEntry(fresh.row, fresh.tags);
   }
@@ -265,12 +282,14 @@ export function createStore(db, now = Date.now) {
 
     /**
      * Change content and tags. With ifUpdatedAt a stale caller gets a conflict. Tags given replace the stored tags,
-     * tags left out keep them. Hashtags in the content always count.
-     * @param {{id: string, content?: string, tags?: string[], ifUpdatedAt?: number}} args
+     * tags left out keep them. Hashtags in the content always count. The reason names the version row, so a change the system makes
+     * (a rebuilt brief) can be told from an edit.
+     * extra is a list of prepared statements that join the same batch (see mutate), and quiet returns null instead of the new state.
+     * @param {{id: string, content?: string, tags?: string[], ifUpdatedAt?: number, reason?: string, extra?: any[], quiet?: boolean}} args
      * @returns {Promise<Entry>}
      */
-    update({ id, content, tags, ifUpdatedAt }) {
-      return mutate(id, "update", async (cur) => contentChange(cur, await parseMemory(content ?? cur.row.content, tags ?? cur.tags)), ifUpdatedAt);
+    update({ id, content, tags, ifUpdatedAt, reason = "update", extra, quiet }) {
+      return mutate(id, reason, async (cur) => contentChange(cur, await parseMemory(content ?? cur.row.content, tags ?? cur.tags)), ifUpdatedAt, { extra, quiet });
     },
 
     /**
@@ -363,7 +382,18 @@ export function createStore(db, now = Date.now) {
       if (sourceId === targetId) throw badRequest("A memory cannot link to itself.");
       const { results } = await db.prepare("SELECT id FROM memories WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?))").bind(JSON.stringify([sourceId, targetId])).all();
       if (results.length < 2) throw notFound("One of the two memories does not exist.");
-      const res = await db.prepare("INSERT OR IGNORE INTO links (source_id, target_id, link_type, created_at, made_by, confidence) VALUES (?, ?, ?, ?, ?, ?)").bind(sourceId, targetId, type.trim().toLowerCase(), now(), madeBy, confidence).run();
+      const t = type.trim().toLowerCase();
+      // A memory that belongs to a private subject stays private only while it has no shared subject. The private rule reads a link to a
+      // shared subject as "this memory is about something everyone may see", so the links the system made to shared subjects go in the
+      // same batch as the private one. A link a person made is theirs and stays (see ARCHITECTURE, the private rule).
+      // A person who makes a link the system already made takes it over: it is theirs from now on, with no confidence, so the system
+      // never deletes it. created stays false, because the link existed.
+      const own = madeBy === "user" ? [db.prepare("UPDATE links SET made_by = 'user', confidence = NULL WHERE source_id = ? AND target_id = ? AND link_type = ? AND made_by = 'system'").bind(sourceId, targetId, t)] : [];
+      const [res] = await db.batch([
+        db.prepare("INSERT OR IGNORE INTO links (source_id, target_id, link_type, created_at, made_by, confidence) VALUES (?, ?, ?, ?, ?, ?)").bind(sourceId, targetId, t, now(), madeBy, confidence),
+        ...own,
+        db.prepare(SHED_SHARED_SQL).bind(sourceId, t, targetId, sourceId),
+      ]);
       return { created: res.meta.changes > 0 };
     },
 

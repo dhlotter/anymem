@@ -78,7 +78,7 @@ async function tailRows(db) {
   const [links, rejections, subjects, devices] = await db.batch([
     db.prepare("SELECT source_id, target_id, link_type, created_at, made_by, confidence FROM links ORDER BY source_id, target_id, link_type"),
     db.prepare("SELECT source_id, target_id, link_type, created_at FROM link_rejections ORDER BY source_id, target_id, link_type"),
-    db.prepare("SELECT id, slug, kind, status, scope, fields, aliases, created_at, updated_at FROM subjects ORDER BY id"),
+    db.prepare("SELECT id, slug, kind, status, scope, fields, aliases, created_at, updated_at, member_hash, built_at, stale_reason FROM subjects ORDER BY id"),
     db.prepare("SELECT id, label, token_hash, created_at, last_used_at, revoked_at, allow_private FROM devices ORDER BY created_at, id"),
   ]);
   return { links: links.results, link_rejections: rejections.results, subjects: subjects.results, devices: devices.results };

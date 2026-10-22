@@ -10,6 +10,7 @@ import { mount as searchMount } from "../ui/screens/search.js";
 import { mount as memoriesMount } from "../ui/screens/memories.js";
 import { mount as activityMount } from "../ui/screens/activity.js";
 import { mount as subjectsMount } from "../ui/screens/subjects.js";
+import { mount as homeMount } from "../ui/screens/home.js";
 
 const NOW = Date.UTC(2026, 9, 19, 12, 0, 0);
 const DAY = 86_400_000;
@@ -215,7 +216,7 @@ test("the drawer lists the links from GET /links, grouped by type with the other
   const text = w.root.querySelector(".mem__panel").textContent;
   assert.match(text, /Links to pip-vet/);
   assert.match(text, /Linked from alpha-plan/);
-  assert.match(text, /70% sure/);
+  assert.match(text, /made by the system, confidence 0\.70/);
   assert.equal(w.root.querySelectorAll('[data-action="unlink"]').length, 2);
 });
 
@@ -643,4 +644,308 @@ test("a memory in the memory drawer shows Subjects only for the cards it is abou
   memoriesMount(none.root, none.ctx, "m1", {});
   await flush();
   assert.doesNotMatch(none.root.querySelector(".mem__panel").textContent, /Subjects/, "a Worker that answers 404 to GET /subjects leaves the row out");
+});
+
+// Proposed subjects. The system proposes a subject and waits for a click: on Home in a list, and in the subject drawer.
+const proposal = (over = {}) => subjectRow({ id: "card-pip", slug: "pip", status: "proposed", member_count: 4, ...over });
+
+function homeWorld(proposed) {
+  const w = world();
+  const state = { proposed, refuse: null };
+  w.state = state;
+  w.answers["/ui/api/growth"] = () => ({ ok: true, days: 30, bucket: "day", origins: [], buckets: [], total: 0 });
+  w.answers["/ui/api/recalls"] = () => ({ ok: true, days: [], total: 0, empty: 0, by_harness: [], most_recalled: [], never_recalled: { count: 0, sample: [] } });
+  w.answers["/ui/api/probation"] = () => ({ ok: true, total: 0, entries: [] });
+  w.answers["/subjects"] = () => ({ ok: true, subjects: state.proposed });
+  const decide = (kind) => (path, opts) => {
+    if (state.refuse) return Promise.reject(state.refuse);
+    const gone = state.proposed.find((s) => s.slug === opts.body.slug);
+    state.proposed = state.proposed.filter((s) => s !== gone);
+    return { ok: true, subject: { ...gone, status: kind === "accept" ? "active" : "retired" } };
+  };
+  w.answers["/subject/accept"] = decide("accept");
+  w.answers["/subject/dismiss"] = decide("dismiss");
+  return w;
+}
+const waiting = (w) => w.root.querySelector("[data-waiting]");
+
+test("Home lists the proposed subjects with their kind and memory count, and asks only for proposed ones", async () => {
+  const w = homeWorld([proposal(), proposal({ id: "card-corolla", slug: "corolla", kind: "asset", name: "The Corolla", member_count: 1 })]);
+  homeMount(w.root, w.ctx, "");
+  await flush();
+  assert.ok(w.calls.some((c) => c.path === "/subjects?status=proposed"));
+  assert.match(waiting(w).textContent, /Subjects waiting for you/);
+  const rows = [...waiting(w).querySelectorAll("tr[data-slug]")];
+  assert.deepEqual(rows.map((r) => r.dataset.slug), ["pip", "corolla"]);
+  assert.match(rows[0].textContent, /Pip/);
+  assert.match(rows[0].textContent, /pet/);
+  assert.equal(rows[0].querySelector("td.num").textContent, "4");
+  assert.equal(rows[0].querySelector("a").getAttribute("href"), "#/subjects?subject=pip", "Open goes to the subject drawer");
+});
+
+test("Home says nothing about subjects when none waits, and a Worker that ignores the filter does not make active subjects look proposed", async () => {
+  const w = homeWorld([]);
+  homeMount(w.root, w.ctx, "");
+  await flush();
+  assert.equal(waiting(w).textContent, "");
+  const loose = homeWorld([subjectRow()]); // an active subject, as an older Worker would send it without a filter
+  homeMount(loose.root, loose.ctx, "");
+  await flush();
+  assert.equal(waiting(loose).textContent, "");
+});
+
+test("Accept on Home posts the slug to /subject/accept, the row goes, and the sidebar is told to refresh", async () => {
+  const w = homeWorld([proposal(), proposal({ id: "card-corolla", slug: "corolla", name: "The Corolla" })]);
+  let changed = 0;
+  addEventListener("anymem:changed", () => changed++);
+  homeMount(w.root, w.ctx, "");
+  await flush();
+  waiting(w).querySelector('[data-action="subject-accept"][data-slug="pip"]').click();
+  await flush();
+  const call = w.calls.find((c) => c.path === "/subject/accept");
+  assert.equal(call.method, "POST");
+  assert.deepEqual(call.body, { slug: "pip" });
+  assert.deepEqual([...waiting(w).querySelectorAll("tr[data-slug]")].map((r) => r.dataset.slug), ["corolla"]);
+  assert.ok(changed >= 1, "the nav badge is asked to count again");
+});
+
+test("Dismiss on Home posts to /subject/dismiss and offers no undo, because the slug stays taken", async () => {
+  const w = homeWorld([proposal()]);
+  homeMount(w.root, w.ctx, "");
+  await flush();
+  waiting(w).querySelector('[data-action="subject-dismiss"]').click();
+  await flush();
+  assert.deepEqual(w.calls.find((c) => c.path === "/subject/dismiss").body, { slug: "pip" });
+  assert.equal(waiting(w).textContent, "", "the section goes when the last proposal is answered");
+  assert.match(w.doc.getElementById("toasts").textContent, /Dismissed/);
+  assert.equal(w.doc.querySelector("#toasts button"), null, "no Undo button");
+});
+
+test("a refused Accept on Home shows the Worker's words, keeps the row and gives the button back", async () => {
+  const w = homeWorld([proposal()]);
+  w.state.refuse = new ApiError(409, "not_proposed", "That subject is not waiting for a click.");
+  homeMount(w.root, w.ctx, "");
+  await flush();
+  const button = waiting(w).querySelector('[data-action="subject-accept"]');
+  button.click();
+  await flush();
+  assert.match(w.root.querySelector("[data-status]").textContent, /That subject is not waiting for a click\./);
+  assert.equal(waiting(w).querySelectorAll("tr[data-slug]").length, 1);
+  assert.equal(button.disabled, false);
+});
+
+test("Home still draws when the list of proposed subjects fails", async () => {
+  const w = homeWorld([]);
+  w.answers["/subjects"] = () => Promise.reject(new ApiError(500, "boom", "The subjects failed."));
+  homeMount(w.root, w.ctx, "");
+  await flush();
+  assert.match(w.root.textContent, /Memories over time/, "the rest of Home is there");
+  assert.equal(waiting(w).textContent, "");
+});
+
+function proposedWorld() {
+  const w = subjectWorld({ card: { status: "proposed", member_count: 2 } });
+  w.state.links = [linkRow({ type: "about", direction: "in", other_id: "m1", other_name: "pip-vet", made_by: "system", confidence: 0.8 }), linkRow({ type: "about", direction: "in", other_id: "m2", other_name: "pip-food", made_by: "system", confidence: 0.65 })];
+  const settle = (status) => (path, opts) => {
+    if (w.state.refuse) return Promise.reject(w.state.refuse);
+    assert.deepEqual(opts.body, { slug: "pip" });
+    w.state.card.status = status;
+    return { ok: true, subject: w.state.card };
+  };
+  w.answers["/subject/accept"] = settle("active");
+  w.answers["/subject/dismiss"] = settle("retired");
+  w.answers["/unlink"] = (path, opts) => {
+    w.state.links = w.state.links.filter((l) => l.other_id !== opts.body.source_id);
+    return { ok: true, removed: true };
+  };
+  return w;
+}
+
+test("a proposed subject opens with Accept and Dismiss, and its evidence listed as members with their confidence", async () => {
+  const w = proposedWorld();
+  await openCard(w);
+  const panel = panelOf(w);
+  assert.match(panel.textContent, /Proposed, waiting for your click/);
+  assert.ok(panel.querySelector('[data-action="subject-accept"]'));
+  assert.ok(panel.querySelector('[data-action="subject-dismiss"]'));
+  assert.equal(panel.querySelector('[data-status="retired"]'), null, "no Retire on a proposal");
+  assert.match(panel.querySelector('tr[data-id="m1"]').textContent, /made by the system, confidence 0\.80/);
+  assert.match(panel.querySelector('tr[data-id="m2"]').textContent, /made by the system, confidence 0\.65/);
+});
+
+test("Accept in the drawer posts the slug, reloads the card as active and says so", async () => {
+  const w = proposedWorld();
+  await openCard(w);
+  panelOf(w).querySelector('[data-action="subject-accept"]').click();
+  await flush();
+  const call = w.calls.find((c) => c.path === "/subject/accept");
+  assert.equal(call.method, "POST");
+  assert.deepEqual(call.body, { slug: "pip" });
+  assert.doesNotMatch(panelOf(w).textContent, /waiting for your click\.? The/, "the proposal notice is gone");
+  assert.equal(panelOf(w).querySelector('[data-action="subject-accept"]'), null);
+  assert.match(panelOf(w).textContent, /Accepted\. Recall can offer this subject now\./);
+  assert.ok(w.calls.filter((c) => c.path.startsWith("/subjects?")).length >= 2, "the list is read again");
+});
+
+test("Dismiss in the drawer posts the slug and shows the subject as retired, with no undo toast", async () => {
+  const w = proposedWorld();
+  await openCard(w);
+  panelOf(w).querySelector('[data-action="subject-dismiss"]').click();
+  await flush();
+  assert.deepEqual(w.calls.find((c) => c.path === "/subject/dismiss").body, { slug: "pip" });
+  assert.match(panelOf(w).textContent, /This subject is retired/);
+  assert.match(panelOf(w).textContent, /will not propose this subject again/);
+  assert.equal(w.doc.querySelector("#toasts button"), null);
+});
+
+test("a refused Accept in the drawer shows the reason and leaves the proposal as it was", async () => {
+  const w = proposedWorld();
+  await openCard(w);
+  w.state.refuse = new ApiError(409, "not_proposed", "That subject is not waiting for a click.");
+  panelOf(w).querySelector('[data-action="subject-accept"]').click();
+  await flush();
+  assert.match(panelOf(w).textContent, /That subject is not waiting for a click\./);
+  assert.ok(panelOf(w).querySelector('[data-action="subject-accept"]'), "the buttons are still there");
+});
+
+test("Not this on a member the system linked posts /unlink with the member as source and the card as target, and does not open the memory", async () => {
+  const w = proposedWorld();
+  await openCard(w);
+  const before = globalThis.location.hash;
+  panelOf(w).querySelector('[data-action="subject-unlink"][data-other="m1"]').click();
+  await flush();
+  const call = w.calls.find((c) => c.path === "/unlink");
+  assert.equal(call.method, "POST");
+  assert.deepEqual(call.body, { source_id: "m1", target_id: CARD, type: "about" });
+  assert.equal(globalThis.location.hash, before, "a click on the button is not a click on the row");
+  assert.match(panelOf(w).textContent, /anymem will not make that link again/);
+  assert.equal(panelOf(w).querySelector('[data-action="subject-unlink"][data-other="m1"]'), null, "the link is gone from the reloaded card");
+  assert.ok(panelOf(w).querySelector('[data-action="subject-unlink"][data-other="m2"]'), "the other one stays");
+});
+
+// Double submit, and what the drawer says about where a brief came from.
+
+test("Home: a double click on Accept sends one request, and both buttons of the row stay off until it ends", async () => {
+  const w = homeWorld([proposal(), proposal({ id: "card-corolla", slug: "corolla", name: "The Corolla" })]);
+  const gate = deferred();
+  const original = w.answers["/subject/accept"];
+  w.answers["/subject/accept"] = (path, opts) => gate.promise.then(() => original(path, opts));
+  homeMount(w.root, w.ctx, "");
+  await flush();
+  const row = waiting(w).querySelector('tr[data-slug="pip"]');
+  const accept = row.querySelector('[data-action="subject-accept"]');
+  const dismiss = row.querySelector('[data-action="subject-dismiss"]');
+  accept.click();
+  accept.click();
+  await flush();
+  assert.equal(accept.disabled, true);
+  assert.equal(dismiss.disabled, true, "Dismiss is off while Accept is on its way");
+  dismiss.click();
+  await flush();
+  assert.equal(w.calls.filter((c) => c.path === "/subject/accept").length, 1);
+  assert.equal(w.calls.filter((c) => c.path === "/subject/dismiss").length, 0, "no second answer for the same row");
+  const other = waiting(w).querySelector('tr[data-slug="corolla"] [data-action="subject-accept"]');
+  assert.equal(other.disabled, false, "another row is not held");
+  gate.resolve();
+  await flush();
+  assert.deepEqual([...waiting(w).querySelectorAll("tr[data-slug]")].map((r) => r.dataset.slug), ["corolla"]);
+});
+
+test("Home: a refused answer gives both buttons back, and the failure goes away once a later answer works", async () => {
+  const w = homeWorld([proposal(), proposal({ id: "card-corolla", slug: "corolla", name: "The Corolla" })]);
+  w.state.refuse = new ApiError(409, "not_proposed", "That subject is not waiting for a click.");
+  homeMount(w.root, w.ctx, "");
+  await flush();
+  const row = waiting(w).querySelector('tr[data-slug="pip"]');
+  row.querySelector('[data-action="subject-accept"]').click();
+  await flush();
+  assert.match(w.root.querySelector("[data-status]").textContent, /not waiting for a click/);
+  assert.equal(row.querySelector('[data-action="subject-accept"]').disabled, false);
+  assert.equal(row.querySelector('[data-action="subject-dismiss"]').disabled, false);
+  w.state.refuse = null;
+  waiting(w).querySelector('tr[data-slug="corolla"] [data-action="subject-accept"]').click();
+  await flush();
+  assert.equal(w.root.querySelector("[data-status]").textContent, "", "the old failure is gone");
+  assert.equal(w.root.querySelector("[data-status]").getAttribute("role"), null);
+});
+
+test("the drawer: a double click on Accept sends one request and Dismiss is off while it runs", async () => {
+  const w = proposedWorld();
+  await openCard(w);
+  const gate = deferred();
+  const original = w.answers["/subject/accept"];
+  w.answers["/subject/accept"] = (path, opts) => gate.promise.then(() => original(path, opts));
+  const accept = panelOf(w).querySelector('[data-action="subject-accept"]');
+  const dismiss = panelOf(w).querySelector('[data-action="subject-dismiss"]');
+  accept.click();
+  accept.click();
+  dismiss.click();
+  await flush();
+  assert.equal(accept.disabled, true);
+  assert.equal(dismiss.disabled, true);
+  assert.equal(w.calls.filter((c) => c.path === "/subject/accept").length, 1);
+  assert.equal(w.calls.filter((c) => c.path === "/subject/dismiss").length, 0);
+  gate.resolve();
+  await flush();
+  assert.match(panelOf(w).textContent, /Accepted/);
+});
+
+test("the drawer: a refused Accept gives the buttons back, and a later success clears the failure", async () => {
+  const w = proposedWorld();
+  await openCard(w);
+  w.state.refuse = new ApiError(409, "not_proposed", "That subject is not waiting for a click.");
+  panelOf(w).querySelector('[data-action="subject-accept"]').click();
+  await flush();
+  assert.match(panelOf(w).textContent, /not waiting for a click/);
+  assert.equal(panelOf(w).querySelector('[data-action="subject-accept"]').disabled, false);
+  w.state.refuse = null;
+  panelOf(w).querySelector('[data-action="subject-accept"]').click();
+  await flush();
+  assert.doesNotMatch(panelOf(w).textContent, /not waiting for a click/);
+  assert.match(panelOf(w).textContent, /Accepted/);
+});
+
+const BUILT = Date.UTC(2026, 9, 20, 12);
+
+test("the drawer says when the brief was built and that anymem wrote it, only for a brief it built", async () => {
+  const w = subjectWorld({ card: { built_at: BUILT, stale_reason: "" } });
+  await openCard(w);
+  const text = panelOf(w).textContent;
+  assert.match(text, /Brief built 2026-10-20\./);
+  assert.match(text, /Written by anymem from the memories below\. Each line cites them\./);
+  assert.doesNotMatch(text, /out of date/);
+  // a brief a person wrote, and one that was never built
+  const hand = subjectWorld({ card: { built_at: BUILT, fields: { brief_pinned: { value: "yes", confirmed_at: NOW, source: "user" } } } });
+  await openCard(hand);
+  assert.doesNotMatch(panelOf(hand).textContent, /Written by anymem/);
+  assert.match(panelOf(hand).textContent, /Written by hand/);
+  assert.doesNotMatch(panelOf(hand).textContent, /Brief pinned/, "the pin is not a field in the list");
+  const never = subjectWorld({ card: { built_at: null } });
+  await openCard(never);
+  assert.doesNotMatch(panelOf(never).textContent, /Written by anymem|Brief built/);
+});
+
+test("a stale subject says why in plain words, and an unknown reason is shown as written", async () => {
+  const cases = [
+    ["uncited_number", /out of date, because a line had a number or a date that no cited memory says\./],
+    ["foreign_id", /because a line cited a memory that is not about this subject\./],
+    ["model.fail.3", /because the model did not answer 3 nights in a row\./],
+    ["members_changed", /because its memories changed, so the old brief was cleared until it is rebuilt\./],
+    ["unbacked_claim", /because a line said something its cited memories do not back up\./],
+  ];
+  for (const [reason, re] of cases) {
+    const w = subjectWorld({ card: { status: "stale", built_at: BUILT, stale_reason: reason } });
+    await openCard(w);
+    assert.match(panelOf(w).textContent, re, reason);
+  }
+  const active = subjectWorld({ card: { status: "active", built_at: BUILT, stale_reason: "uncited_number" } });
+  await openCard(active);
+  assert.doesNotMatch(panelOf(active).textContent, /out of date/, "a reason on a subject that is not stale is not shown");
+});
+
+test("a hostile stale reason is shown as text", async () => {
+  const w = subjectWorld({ card: { status: "stale", built_at: BUILT, stale_reason: "<img src=x onerror=alert(1)>" } });
+  await openCard(w);
+  assert.equal(panelOf(w).querySelector("img"), null);
+  assert.match(panelOf(w).textContent, /<img src=x onerror=alert\(1\)>/);
 });

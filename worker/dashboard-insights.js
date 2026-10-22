@@ -4,7 +4,7 @@
 // getCapsule, and which rebuilds itself on a read after a capsule change, as GET /prompt-capsules/core does.
 import { listBackups } from "./backup/backup.js";
 import { CAP_CHARS, getCapsule } from "./capsule.js";
-import { PENDING_PROPOSALS_SQL, tokenExpiryInfo } from "./dashboard-api.js";
+import { NOT_A_CARD_SQL, PENDING_PROPOSALS_SQL, tokenExpiryInfo } from "./dashboard-api.js";
 import { deriveChecks, summarize } from "./dashboard-status.js";
 import { badRequest, intParam, json } from "./http.js";
 import { foldByHarness, harnessLabel } from "./harnesses.js";
@@ -30,7 +30,8 @@ const STATE_SQL = {
 };
 export const MACHINE_RECALL = "route = '/recall' AND method = 'GET' AND actor_kind <> 'browser' AND status < 400";
 // Never recalled leaves out what reaches agents another way: profile and person notes, and the capsule (tagged capsule:core or capsule-slot:*).
-const NEVER_RECALLED_SQL = `pinned = 0 AND origin NOT IN ('profile', 'person') AND recall_count = 0 AND last_recalled_at IS NULL AND created_at <= ?
+// A subject card is not a memory the person wrote, so it is never "never recalled" (plan section 12.5: counts leave cards out).
+const NEVER_RECALLED_SQL = `pinned = 0 AND ${NOT_A_CARD_SQL} AND origin NOT IN ('profile', 'person') AND recall_count = 0 AND last_recalled_at IS NULL AND created_at <= ?
   AND NOT EXISTS (SELECT 1 FROM memory_tags t WHERE t.memory_id = memories.id AND (t.tag LIKE 'capsule:%' OR t.tag LIKE 'capsule-slot:%'))`;
 const marks = (list) => list.map(() => "?").join(", ");
 const n0 = (v) => Number(v ?? 0);
@@ -77,9 +78,9 @@ export async function home(c) {
   const w0 = at - WEEK_MS;
   const w1 = at - 2 * WEEK_MS;
   const base = await (await stats(c)).json();
-  const [live, added, recalled, calls, closed, trash, pending, profile, nightly, keys, activity] = await env.DB.batch([
-    env.DB.prepare(`SELECT COUNT(*) AS n FROM memories WHERE ${LIVE}`),
-    env.DB.prepare("SELECT COALESCE(SUM(created_at >= ?), 0) AS week, COALESCE(SUM(created_at < ?), 0) AS prev FROM memories WHERE deleted_at IS NULL AND created_at >= ?").bind(w0, w0, w1),
+  const [live, added, recalled, calls, closed, trash, pending, profile, nightly, keys, activity, proposed] = await env.DB.batch([
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM memories WHERE ${LIVE} AND ${NOT_A_CARD_SQL}`),
+    env.DB.prepare(`SELECT COALESCE(SUM(created_at >= ?), 0) AS week, COALESCE(SUM(created_at < ?), 0) AS prev FROM memories WHERE deleted_at IS NULL AND created_at >= ? AND ${NOT_A_CARD_SQL}`).bind(w0, w0, w1),
     env.DB.prepare("SELECT COUNT(*) AS n FROM memories WHERE deleted_at IS NULL AND last_recalled_at >= ?").bind(w0),
     env.DB.prepare(`SELECT COALESCE(SUM(ts >= ?), 0) AS week, COALESCE(SUM(ts < ?), 0) AS prev FROM audit WHERE ${MACHINE_RECALL} AND ts >= ?`).bind(w0, w0, w1),
     env.DB.prepare(`SELECT COALESCE(SUM(created_at >= ?), 0) AS week, COALESCE(SUM(created_at < ?), 0) AS prev FROM memory_versions WHERE reason IN (${marks(SYSTEM_REASONS)}) AND created_at >= ?`).bind(w0, w0, ...SYSTEM_REASONS, w1),
@@ -89,6 +90,8 @@ export async function home(c) {
     env.DB.prepare("SELECT started_at, finished_at, ok, summary FROM runs WHERE job = 'nightly' ORDER BY id DESC LIMIT 1"),
     env.DB.prepare("SELECT COUNT(*) AS n FROM memory_keys WHERE vector_id IS NOT NULL"),
     env.DB.prepare(`SELECT COUNT(*) AS n FROM memory_versions WHERE reason IN (${marks(SYSTEM_REASONS)}) AND created_at >= ?`).bind(...SYSTEM_REASONS, w0),
+    // The subjects the system proposed and nobody has answered. The card is joined so a card in the trash does not count.
+    env.DB.prepare("SELECT COUNT(*) AS n FROM subjects s JOIN memories m ON m.id = s.id WHERE s.status = 'proposed' AND m.deleted_at IS NULL"),
   ]);
   let vectorCount = null;
   try {
@@ -133,6 +136,7 @@ export async function home(c) {
       live: live.results[0].n,
       trash: trash.results[0].n,
       pending: pending.results[0].n,
+      subjects_proposed: proposed.results[0].n,
       activity_week: activity.results[0].n,
       capsule_chars: capsule?.chars ?? null,
       capsule_cap: CAP_CHARS,
@@ -353,12 +357,19 @@ export async function trash({ env, url, now, memoryIds }) {
   });
 }
 
+/** Why a step refused. The backup's refusal is an object and means a shrunk export. Another step says its own reason in a string. */
+function refusal(name, refused) {
+  if (typeof refused === "string") return refused.slice(0, 160);
+  if (name === "backup") return "Refused, it had far fewer entries than the last backup.";
+  return "Refused.";
+}
+
 /** What a step of the nightly job did, in one short phrase and a state. */
 export function stepView(name, v) {
   const label = name.replace(/_/g, " ");
   if (!v || typeof v !== "object") return { name: label, state: "ok", headline: "" };
   if (v.error) return { name: label, state: "failed", headline: String(v.error).slice(0, 160) };
-  if (v.refused) return { name: label, state: "refused", headline: "Refused, it had far fewer entries than the last backup." };
+  if (v.refused) return { name: label, state: "refused", headline: refusal(name, v.refused) };
   if (v.skipped) return { name: label, state: "skipped", headline: String(v.skipped).slice(0, 120) };
   const skip = new Set(["subrequests", "ms"]);
   const parts = Object.entries(v)

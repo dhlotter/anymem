@@ -8,6 +8,8 @@ import { askJson, asData } from "../ai.js";
 import { createCounters } from "../counters.js";
 import { badRequest, json, readJson } from "../http.js";
 import { TYPES } from "../memory/parse.js";
+import { cleanHint, mentions } from "../subjects/hint.js";
+import { KINDS } from "../subjects/store.js";
 import { echoesInjected, findSecret, readsAsInstruction, touchesBlockedTopic } from "../write/screen.js";
 
 export const DEFAULT_MAX = 2;
@@ -80,6 +82,7 @@ const SCHEMA = {
           field: { type: "string" },
           value: { type: "string" },
           said: { type: "string" },
+          subject: { type: "object", properties: { name: { type: "string" }, kind: { type: "string" } } },
         },
         required: ["type"],
       },
@@ -131,6 +134,8 @@ Likewise, when the USER tells you who another person is to them, or states a las
 Empty is the usual correct answer. Most sessions yield zero or one memory. If you are unsure a fact is durable, return nothing. Return at most ${max} memory items.
 
 Memory items have these fields: "type" (user, feedback, project or reference), "name" (kebab-case slug, 60 characters max), "description" (one line used for recall, 160 characters max), "body" (the fact; for feedback and project add a line starting **Why:** and a line starting **How to apply:**; plain sentences, no dashes joining clauses).
+
+A memory item may also carry "subject": {"name": the name as written in the memory, "kind": one of ${KINDS.join(", ")}}. Set it only when the memory introduces a named person, pet, vehicle, property, project or topic that has its own identity ("Pip is my dog" gives name Pip, kind pet; "the Corolla needs new tyres in June" gives name Corolla, kind asset). Never set it for a general rule or preference, and never for a company or a tool unless it is the user's own project. At most one subject per memory, and leave it out when unsure.
 
 Answer with JSON only: {"items": [ ... ]}. Use {"items": []} when nothing qualifies.
 
@@ -185,6 +190,7 @@ const FORMATS = { email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, phone: /^\+?[\d\s()]{7,}$
 /**
  * Screen one memory item with the rules of the client's screen(), then the extractor's own: a to do or status line,
  * a body that does not explain its description, and a body that contains an example from the prompt.
+ * A subject hint that is not usable is dropped and the memory stays.
  * @returns {{item: object} | {reason: string}}
  */
 function screenMemory(p) {
@@ -206,7 +212,8 @@ function screenMemory(p) {
   const bodyStems = stems(body);
   if (wanted.size && overlap(wanted, bodyStems) < Math.min(2, wanted.size)) return { reason: "body_mismatch" };
   if (PROMPT_EXAMPLES.some((ex) => overlap(ex, bodyStems) / ex.size >= 0.8)) return { reason: "prompt_example" };
-  return { item: { name, type, description, body } };
+  const subject = cleanHint(p.subject);
+  return { item: { name, type, description, body, ...(subject && mentions(`${description}\n${body}`, subject.name) ? { subject } : {}) } };
 }
 
 /** The same name or nearly the same body as a memory already kept from this response. */

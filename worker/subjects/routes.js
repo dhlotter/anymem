@@ -5,7 +5,8 @@ import { harnessId } from "../harnesses.js";
 import { badRequest, HttpError, json, notFound, readJson } from "../http.js";
 import { indexMemories } from "../search/indexer.js";
 import { REASONS, screenExplicit } from "../write/screen.js";
-import { canSee, visibleOnly } from "./private.js";
+import { clearCiting, clearIneligible } from "./clear.js";
+import { canSee, seesPrivate, SHED_MEMBERS_SQL, visibleOnly } from "./private.js";
 import { createSubjectStore, KINDS, SCOPES, STATUSES } from "./store.js";
 
 /** Bring the search keys and vectors of the card up to date after the reply has gone. A failure leaves it marked for the nightly job. */
@@ -38,6 +39,13 @@ export async function createSubject(c) {
   return json({ ok: true, subject });
 }
 
+/** The members of a subject that has just become private stop being readable through anything shared. */
+async function hideMembers({ env, ctx, now }, id) {
+  await env.DB.prepare(SHED_MEMBERS_SQL).bind(id, id).run();
+  const { results } = await env.DB.prepare("SELECT source_id FROM links WHERE target_id = ? AND link_type = 'about'").bind(id).all();
+  await clearCiting(env, { ids: results.map((r) => r.source_id), now, ctx, sharedOnly: true, why: "member.private", strict: true });
+}
+
 /** POST /subject/update {id | slug, name?, brief?, fields?, aliases?, scope?, status?} */
 export async function updateSubject(c) {
   const { request, env, now, maxBody, memoryIds } = c;
@@ -49,9 +57,23 @@ export async function updateSubject(c) {
   const changes = ["name", "brief", "fields", "aliases", "scope", "status"];
   if (!changes.some((k) => body[k] !== undefined)) throw badRequest(`Send at least one of ${changes.join(", ")}.`);
   refuseSecret(body);
+  const was = body.scope === undefined ? null : (await env.DB.prepare("SELECT scope FROM subjects WHERE id = ?").bind(id).first())?.scope;
   const subject = await store.update(id, body);
-  if (body.name !== undefined || body.brief !== undefined) indexLater(c, id);
+  // A subject that turns private makes every member private, so the shared subjects the system linked those members to, and the shared briefs built from them, go now.
+  if (body.scope === "private" && was !== "private") await hideMembers(c, id);
+  // A private subject that turns shared may hold text of members that belong to another private subject, which a shared card must not.
+  if (body.scope === "shared" && was === "private") await clearIneligible(env, { now, ctx: c.ctx, only: id, strict: true });
+  if (body.name !== undefined || body.brief !== undefined || body.status === "active") indexLater(c, id);
   return json({ ok: true, subject });
+}
+
+/**
+ * A closed device is not told when a brief was built or why it is stale. "members_changed" and a blank build time say that a member
+ * of the subject has just gone private or been forgotten, which is the one thing a closed device must not learn.
+ */
+function withoutBriefState(subject) {
+  delete subject.built_at;
+  delete subject.stale_reason;
 }
 
 /** GET /subjects?kind=&status=&scope=&q= */
@@ -64,6 +86,7 @@ export async function listSubjects({ env, url, now, memoryIds, actor }) {
   });
   const seen = await visibleOnly(env.DB, subjects, actor);
   memoryIds.push(...seen.map((s) => s.id));
+  if (seen.length && !(await seesPrivate(env.DB, actor))) seen.forEach(withoutBriefState);
   return json({ ok: true, subjects: seen });
 }
 
@@ -78,5 +101,6 @@ export async function getSubject({ env, url, now, memoryIds, actor }) {
   if (!subject) throw notFound("No such subject.");
   memoryIds.push(subject.id);
   subject.members = await visibleOnly(env.DB, subject.members, actor);
+  if (!(await seesPrivate(env.DB, actor))) withoutBriefState(subject);
   return json({ ok: true, subject });
 }

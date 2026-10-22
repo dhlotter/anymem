@@ -56,7 +56,7 @@ test("GET /count counts live memories only", async () => {
 test("GET /stats on an empty store", async () => {
   const app = await createApp();
   const res = await app.call("/stats");
-  assert.deepEqual(res.json, { count: 0, by_status: {}, by_origin: {}, unvectorized: 0, unclassified: 0, last_run: null, ...EMPTY_COUNTERS });
+  assert.deepEqual(res.json, { count: 0, by_status: {}, by_origin: {}, unvectorized: 0, unclassified: 0, subjects_on: false, subjects_auto: false, subjects_briefs: false, last_run: null, ...EMPTY_COUNTERS });
 });
 
 test("GET /stats counts by status and origin, unvectorized and unclassified", async () => {
@@ -80,7 +80,7 @@ test("GET /stats shows the last cron run", async () => {
   const { last_run } = (await app.call("/stats")).json;
   assert.equal(last_run.job, "nightly");
   assert.equal(last_run.ok, true);
-  assert.deepEqual(Object.keys(last_run.summary), ["backup", "purge_trash", "reindex", "classify", "merge", "probation", "purge_old", "token"]);
+  assert.deepEqual(Object.keys(last_run.summary), ["clear", "backup", "purge_trash", "reindex", "classify", "cluster", "briefs", "merge", "probation", "purge_old", "token"]);
   assert.equal(last_run.summary.purge_old.audit, 0);
 });
 
@@ -206,9 +206,9 @@ test("routes need auth", async () => {
   }
 });
 
-test("the Worker version is 2.0.8 and matches package.json and the plugin manifest", () => {
+test("the Worker version is 2.1.0 and matches package.json and the plugin manifest", () => {
   const read = (rel) => JSON.parse(readFileSync(new URL(rel, import.meta.url), "utf8"));
-  assert.equal(VERSION, "2.0.8");
+  assert.equal(VERSION, "2.1.0");
   assert.equal(read("../package.json").version, VERSION);
   assert.equal(read("../../.claude-plugin/plugin.json").version, VERSION);
 });

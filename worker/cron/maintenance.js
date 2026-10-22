@@ -7,6 +7,9 @@ import { tokenExpiryInfo } from "../dashboard-api.js";
 import { HttpError, badRequest, json, readJson } from "../http.js";
 import { runBackup } from "../backup/backup.js";
 import { createBudget, countedEnv, nightlyLimits } from "./budget.js";
+import { briefsStep } from "./briefs.js";
+import { clearStep } from "./clear.js";
+import { clusterStep } from "./cluster.js";
 import { classifyStep, reindexStep } from "./indexing.js";
 import { mergeDuplicates } from "./merge.js";
 import { runProbation } from "./probation.js";
@@ -37,10 +40,15 @@ function withDeadline(work, ms) {
 
 /** The steps in the order they run. */
 export const STEPS = {
+  // The first thing that spends the shared budget, so a reindex backlog cannot starve it. It blanks the briefs whose text must be gone.
+  clear: clearStep,
   backup: backupStep,
   purge_trash: purgeTrash,
   reindex: reindexStep,
   classify: classifyStep,
+  // The two subject steps run before merge, which keeps going until the shared budget is gone.
+  cluster: clusterStep,
+  briefs: briefsStep,
   merge: mergeDuplicates,
   probation: runProbation,
   purge_old: purgeOld,

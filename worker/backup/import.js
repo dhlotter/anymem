@@ -5,11 +5,15 @@
 import { badRequest, HttpError } from "../http.js";
 import { FTS_INSERT } from "../memory/store.js";
 import { memoryIdFits } from "../search/chunk.js";
+import { clearIneligible } from "../subjects/clear.js";
+import { SHED_ALL_SQL } from "../subjects/private.js";
 import { MEMORY_COLUMNS } from "./export.js";
 
 const PARALLEL = 10;
 const MAX_ERRORS = 20;
 const LINK_BATCH = 100;
+const MAX_HASH_CHARS = 128;
+const MAX_REASON_CHARS = 64;
 const HASH = /^[0-9a-f]{64}$/;
 const SUBJECT_KINDS = ["person", "pet", "asset", "project", "area", "topic"];
 const SUBJECT_STATUSES = ["proposed", "active", "stale", "retired"];
@@ -134,13 +138,18 @@ async function importSubjects(db, subjects, errors) {
     const scope = s?.scope ?? "shared";
     const fields = jsonColumn(s?.fields, "{}", false);
     const aliases = jsonColumn(s?.aliases, "[]", true);
-    if (!id || typeof s.slug !== "string" || !s.slug || !SUBJECT_KINDS.includes(s.kind) || !SUBJECT_STATUSES.includes(s.status) || !["shared", "private"].includes(scope) || fields === null || aliases === null || !isTime(s.created_at) || !isTime(s.updated_at)) {
-      errors.push({ id, error: "A subject needs id, slug, a kind and status it knows, scope shared or private, fields as a JSON object, aliases as a JSON list, created_at and updated_at." });
+    // The brief columns arrived in 0007. A backup from before has none, which means a brief that was never built.
+    const memberHash = s?.member_hash ?? "";
+    const staleReason = s?.stale_reason ?? "";
+    const builtAt = s?.built_at ?? null;
+    const briefOk = typeof memberHash === "string" && memberHash.length <= MAX_HASH_CHARS && typeof staleReason === "string" && staleReason.length <= MAX_REASON_CHARS && (builtAt === null || isTime(builtAt));
+    if (!id || typeof s.slug !== "string" || !s.slug || !SUBJECT_KINDS.includes(s.kind) || !SUBJECT_STATUSES.includes(s.status) || !["shared", "private"].includes(scope) || fields === null || aliases === null || !briefOk || !isTime(s.created_at) || !isTime(s.updated_at)) {
+      errors.push({ id, error: "A subject needs id, slug, a kind and status it knows, scope shared or private, fields as a JSON object, aliases as a JSON list, created_at and updated_at, and member_hash, built_at and stale_reason when it has them." });
     } else {
       statements.push(
         db
-          .prepare("INSERT OR IGNORE INTO subjects (id, slug, kind, status, scope, fields, aliases, created_at, updated_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM memories WHERE id = ?)")
-          .bind(id, s.slug, s.kind, s.status, scope, fields, aliases, s.created_at, s.updated_at, id),
+          .prepare("INSERT OR IGNORE INTO subjects (id, slug, kind, status, scope, fields, aliases, created_at, updated_at, member_hash, built_at, stale_reason) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM memories WHERE id = ?)")
+          .bind(id, s.slug, s.kind, s.status, scope, fields, aliases, s.created_at, s.updated_at, memberHash, builtAt, staleReason, id),
       );
     }
   }
@@ -186,8 +195,9 @@ async function importDevices(db, devices, errors, reactivate, now) {
  * @param {Record<string, any>} body the parsed document
  * @param {{offset: number, limit: number}} page
  * @param {string[]} memoryIds receives the ids that were stored
+ * @param {{now?: () => number, ctx?: {waitUntil: (p: Promise<any>) => void}}} [by] now and ctx for the clearing that follows the last page
  */
-export async function importV2(env, body, { offset, limit }, memoryIds) {
+export async function importV2(env, body, { offset, limit }, memoryIds, { now = Date.now, ctx } = {}) {
   const db = env.DB;
   if (!Array.isArray(body.entries)) throw badRequest("entries must be a list.");
   const lists = Object.fromEntries(["versions", "questions", "links", "link_rejections", "subjects", "devices"].map((k) => [k, body[k] ?? []]));
@@ -243,6 +253,12 @@ export async function importV2(env, body, { offset, limit }, memoryIds) {
     const dev = await importDevices(db, lists.devices, errors, reactivate, Date.now());
     devices = dev.changes;
     reactivated = dev.reactivated;
+    // A backup older than the store may carry links the store has since taken away (the system's links to shared subjects of a memory that
+    // is private now, the derived_from links of a brief that was cleared). They come back with the links above, so the two rules that took them
+    // away run again over everything: the system's shared links go from memories that have a private link, and a card that cites a memory
+    // that may not feed it is blanked. The nightly run does the second one too, for what is left over.
+    await db.prepare(SHED_ALL_SQL).run();
+    await clearIneligible(env, { now, ctx });
   }
   return { ok: true, format: 2, ...counts, links, link_rejections: linkRejections, subjects, devices, reactivated_devices: reactivated, errors, next_offset: nextOffset, remaining };
 }

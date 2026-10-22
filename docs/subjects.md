@@ -1,0 +1,115 @@
+# Subjects, and letting anymem do part of the work
+
+A subject is a thing your memories are about, such as Pip the dog, the Corolla, a project or Dana the colleague. You can make and change subjects by hand, see [commands](commands.md) and [dashboard](dashboard.md). This page is about the part anymem can do by itself. It can link a new memory to the subject it is about, suggest a subject for something new, and keep each subject's short brief up to date. All of it is off until you turn it on, and you stay in charge of what becomes a subject.
+
+## The switch
+
+1. **Three settings.** `SUBJECTS` makes recall offer a subject's card. `SUBJECTS_AUTO` lets the Worker act on subjects by itself. `SUBJECTS_BRIEFS` lets the nightly job write briefs. All three are Worker variables, `on` or `off`, and all three default to off.
+2. **What must be on.** Linking after a write, proposals from a hint and the nightly clustering step run only when `SUBJECTS` and `SUBJECTS_AUTO` are both `on`. The nightly brief step builds briefs only when `SUBJECTS_BRIEFS` is `on` as well. A brief is a model's reading of free text, and the checks on it are weaker than the checks on a link, so it has its own switch. Taking a brief away when its text must go needs no switch at all, see item 7 of The brief. With a switch off, the Worker does what it did before this existed.
+3. **How to turn it on.** Add `"SUBJECTS": "on"` and `"SUBJECTS_AUTO": "on"` to the `vars` block of `worker/wrangler.jsonc`, then run `setup.py` again. Add `"SUBJECTS_BRIEFS": "on"` too when you want briefs, and leave it out until you have read a few. Setup copies that block on every run. To turn it off, set `SUBJECTS_AUTO` to `off` or remove it, and run setup again. To stop only the briefs, do the same with `SUBJECTS_BRIEFS`.
+4. **What works whatever the switch says.** Your own clicks (Accept and Dismiss), the two preview routes and the replay script. They either are your decision or write nothing. Blanking a brief whose text must go works whatever the switches say too.
+5. **Check it.** `anymem doctor` prints a `subjects` line such as `3 active, 1 proposed, 0 stale, 0 private, auto on, briefs off`. It says `auto off` when `SUBJECTS_AUTO` is not on, `auto on, briefs on` or `auto on, briefs off` for the third switch, and `auto set but SUBJECTS is off, so it does nothing` when only the automation switch is set. The line needs the admin token, because the switches come from `GET /stats`, which reports the third switch as `subjects_briefs`. With a device token, or an older Worker that does not report them, you get the counts and nothing more.
+
+## See what it would do first
+
+Before you switch `SUBJECTS_AUTO` on, look at what linking would do to your own memories. Run the replay script as the admin.
+
+```
+ANYMEM_URL=https://memory.example.com ANYMEM_TOKEN=... node scripts/subjects-replay.mjs --days 7 --sample links.tsv
+```
+
+It walks `GET /admin/subjects/assign-preview` a few memories at a time and writes nothing to the store. It prints how many memories it saw, how many would link, how many links that is, and how many have an ambiguous name. It also writes up to 40 random would-be links to the file you name, one a line, with tabs between the memory name, a snippet, the subject slug, the confidence and how it was decided. Read the file. If more than 1 in 20 of the links is wrong, leave `SUBJECTS_AUTO` off. The file holds memory text, so keep it out of any repository.
+
+The script reads `ANYMEM_URL` and `ANYMEM_TOKEN` from the environment, and `ANYMEM_ACCESS_CLIENT_ID` and `ANYMEM_ACCESS_CLIENT_SECRET` when the Worker sits behind Access. It never follows a redirect, so the token cannot be sent to an address you did not set.
+
+For the proposals the nightly step would make, call `GET /admin/subjects/cluster-preview` with the admin token. It lists the groups it would propose, with the notes behind each, and the groups it dropped and why.
+
+## Turning the automatic part on
+
+Do these in order. Each step reads or checks before the next one changes anything. Links and proposals come first, and they are switched on with `SUBJECTS_AUTO`. Briefs are a separate, later step, switched on with `SUBJECTS_BRIEFS` once you have read some of them.
+
+1. **Check the switches.** `SUBJECTS` should be `on`, and `SUBJECTS_AUTO` and `SUBJECTS_BRIEFS` should be `off`. `anymem doctor` prints `auto off` on its `subjects` line while `SUBJECTS_AUTO` is off. `GET /stats` with the admin token shows all three, as `subjects_on`, `subjects_auto` and `subjects_briefs`.
+2. **Run the previews and read them.** Run `GET /admin/subjects/assign-preview` through `scripts/subjects-replay.mjs`, and call `GET /admin/subjects/cluster-preview`. Nothing is written by either one.
+3. **Read the 40 sample links.** The replay script writes up to 40 would-be links to the file you name. Read each one and count the wrong ones.
+4. **Decide on links and proposals.** Turn `SUBJECTS_AUTO` on only if fewer than 1 in 20 are wrong. Set the Worker variable to `on`, leave `SUBJECTS_BRIEFS` off, and redeploy, which means running `setup.py` again as described in The switch above.
+5. **Wait for proposals.** They appear on Home under "Subjects waiting for you". Nothing becomes a subject until you click Accept. Read the links the system makes in the memory drawer, and press Not this on a wrong one.
+6. **Briefs come later, and you read a sample.** Leave `SUBJECTS_BRIEFS` off until links and proposals have run well for a while. A brief has no preview, so the sample is the first briefs the step builds, at most 8 a night. Switch `SUBJECTS_BRIEFS` on, open each new brief in its subject drawer, and read every line next to the memories it cites before you rely on any of them. Switch it off again if the lines are not true. A built brief can be undone from the card's history.
+7. **Why briefs have their own switch.** The check on a brief is a heuristic on words, not proof. It stops a line that came from nowhere, and it still lets some false lines through. It also refuses some honest ones. Read a brief as a summary written by a model.
+8. **To turn it off.** Set the variable to `off` and redeploy the same way. `SUBJECTS_AUTO` stops everything automatic, and `SUBJECTS_BRIEFS` alone stops only the briefs. Nothing already written is removed. The links, proposals and briefs stay as they are, except that a brief whose cited memory is forgotten, replaced or linked to a private subject is still blanked, see item 7 of The brief.
+
+These kinds of false line still pass the check.
+
+1. **A dropped negation.** A memory says "Pip is not allowed on the sofa", and the line says "Pip is allowed on the sofa". The check only fails a line that adds a "not". A line that drops one is allowed.
+2. **A swapped word.** A line that turns "bigger" into "smaller", or "before" into "after", passes when it holds no digit or capital that is missing from the memory and still shares enough words with it.
+3. **A swapped role.** A memory says "Dana lent the Corolla to Sam", and the line says "Sam lent the Corolla to Dana". Both names are in the memory, so the check passes it.
+4. **Numbers matched as a set.** Each number, with the word after it, is looked for in the cited memories as a whole, not in the place it stands. A line may pair a number with the wrong thing when both appear in the cited memories.
+
+An honest, true line is sometimes refused too. A line that adds up two numbers, spells a number in a way the check does not read, or says a thing in words that share fewer than 2 content words with the memory fails, and so does a line with a capital the memory lacks. The subject then shows as stale with the reason, and the next night tries again.
+
+## Linking a memory to its subjects
+
+After a memory is saved and the reply has gone, the Worker looks at which subjects it is about. This happens in the background, so saving is no slower.
+
+1. **By name.** The subject's slug, its name and its aliases are looked for in the memory as whole words. Pip matches "Pip's bowl" but not "Pipeline". A name of fewer than 3 characters never matches. A match is certain, confidence 1.0.
+2. **By neighbours.** If at least 3 of the 5 closest memories already belong to the same subject, and the closest of them is at least 0.6 similar, the memory is linked with a lower confidence. A link below 0.5 is never made.
+3. **A name two subjects share links to neither.** If Rowan is the name of a dog and of a colleague, a memory that says only "Rowan" is left alone, and the audit shows an `assign.ambiguous` row. A name that only one of them has settles it.
+4. **Never again.** A link you refuse is never made again. See below.
+5. **Not everything is linked.** A profile, person or system memory is never linked, and one write links a memory to at most 3 subjects.
+6. **Private subjects.** The Worker may link to a private subject. A device whose private access is off is never linked to one by this step, so a private subject cannot be inferred from the writer's own memories. A memory that names a private subject links only to private subjects. A shared link would make the memory readable by every device, so the shared candidates are dropped for it. When a memory gets a link to a private subject by any route, the links the system had already made from it to shared subjects are removed in the same moment. Only a link to a private subject can do this. A plain link between two memories, or a link to a shared subject, never removes anything. A private subject that you turn shared drops its system made links from members that also belong to another private subject. A link you made by hand is never removed this way.
+7. **A link you make is yours.** If you link a memory to a shared subject yourself, that memory is visible to every device. That is by design, because a link by a person is never undone by the system. Linking a memory yourself to a subject the system already linked it to makes the link yours, and the system keeps its hands off it from then on.
+
+Every link the system makes is written to the audit trail with the system as the caller, and with how it was decided, for example `how:alias.conf:1.0`.
+
+## Subjects waiting for you
+
+When automation is on, anymem can propose a subject by itself, for example when you say "Pip is my dog" or when five memories keep using the same tag. A proposal is not a subject yet. Recall never offers it and no memory is moved into it. It waits for your click.
+
+You see proposals in two places. The Home page lists them under Subjects waiting for you. The Subjects item in the sidebar shows how many there are.
+
+1. **Accept** makes the subject active. From then on recall can offer its card, and new memories can be linked to it. The memories that caused the proposal stay linked as its first members, except one that has since got a link to a private subject. That link to the proposal is dropped when the system made it, because the accepted subject is shared and the link would make the memory readable by every device. A link you made yourself stays, and that memory then shows to every device, because you filed it under a shared subject. Bringing a dismissed proposal back to active does the same.
+2. **Dismiss** retires the proposal and keeps its name taken, so the same proposal does not come back. There is no undo for a dismissal. If you change your mind, bring the subject back to active from the Subjects screen, which also makes its card active and clears the one line brief the proposal had, or make a subject by hand with a different slug.
+3. **Open** shows the subject in its drawer. The memories listed there are the evidence for the proposal.
+
+You can also run `subject.py list --status proposed` to see them, and `subject.py accept SLUG` or `subject.py dismiss SLUG` in your own terminal. An agent never runs those two.
+
+A memory the system linked to a subject shows "made by the system, confidence 0.80" in the memory drawer and in the list of members of the subject. Press Not this to refuse that link. anymem remembers the refusal and does not make the same link again. If you link the memory to that subject yourself, the link becomes yours and the system never removes it.
+
+The subject drawer says when the brief was built ("Brief built 2026-10-20"). For a brief anymem wrote, it says the brief was written by anymem from the memories below and that each line cites them. A brief you wrote or edited yourself says it was written by hand and is not rebuilt. When a rebuild failed a check, the drawer says the brief is out of date and gives the reason in plain words, for example a line with a number that no cited memory says, or the model not answering for several nights.
+
+## What makes a proposal
+
+1. **A hint from the extractor.** When capture reads a session, the extractor may add a subject hint to a memory that introduces a named person, pet, vehicle, property, project or topic with its own identity. "Pip is my dog" gives the name Pip and the kind pet. It never sets a hint for a general rule, a preference, a company or a tool, unless the tool is your own project. The Worker checks the hint again. The name must be 2 to 60 characters of plain text, at most 5 words, made of Latin letters, digits, spaces, apostrophes, periods, hyphens and ampersands. A name in another alphabet is refused, because a subject's short name can only hold Latin letters and digits. A name that starts with a command verb and has three words or more is refused, and so is any name that contains the word memory, memories, token, password, instructions or prompt. That also refuses a few honest names such as "Open Door Church". Add those subjects by hand. A link, an address, a colon, a comma or a hidden character makes the hint useless. The name must not be a generic word such as "team" or "project", must hold no secret or instruction, and must appear in the memory's description or body. A hint is used only when the linking step did not link the memory to any subject and the memory has no subject link at all. At most 25 proposals wait at once, after that a hint is dropped.
+2. **Nightly clustering.** Once a night the Worker looks for recent captured and explicit memories that belong to no subject and share a name. It groups them by a shared tag, a shared project or a shared first word of the memory name. A group of five or more is a candidate. It then reads the stored vectors of the group and drops it unless the memories are close in meaning (mean cosine of at least 0.55). A group it cannot check inside the night's budget is dropped, never proposed unchecked. It makes at most three proposals a night. A group it dropped for being too loose is not looked at again for a week, so a few big loose groups cannot use every night's checks. It makes no proposal while 25 are already waiting for your click.
+3. **Only new names.** A name that already exists as a subject in any status, or as an alias of one, is never proposed. That includes a dismissed proposal. A name that is a whole word of an existing slug counts too, so `corolla` is not proposed while `toyota-corolla` exists.
+4. **Safe to ignore.** A proposal that sits there does nothing. Each proposal is written to the audit trail, and nothing is deleted when you dismiss one. A proposal that fails halfway is removed, so its name is free again.
+5. **Private subjects.** A proposal never links a memory that already has a subject link, because a link to a new shared subject could make a private memory readable by every device. A hint sent by a device whose private access is off makes no proposal, and that device never sees a proposed or dismissed subject or a link to one.
+
+## The brief
+
+A subject card holds a short brief. You can write it yourself, or let anymem build it.
+
+When anymem builds it, it reads the newest 20 memories about the subject and asks the small model to write a few short lines, under Now and History. Each line says which memories it comes from, at most 3. Before anything is saved, anymem checks every line.
+
+1. **A line must cite a memory of the subject.** A line that cites nothing, cites more than 3 memories, or cites a memory that is not a member, fails.
+2. **A cited memory must still count.** A memory that has been trashed or replaced since the model saw it fails.
+3. **Every number and date must be written in a memory the line cites.** Numbers are compared as numbers, so 1,450 and 1450 are the same, 1,5 is read as 1.5 and never as 15, and "three" is the same as 3. A number is compared with the word after it, so "12 grams" is not backed by "12 kilos". A month name is a month in any case, May too, so "in May" needs a May in a cited memory. A date written in any form matches the same date in another form. The date a memory was written counts only as a whole date, so a line cannot take its year, its day or its month as a number. A number written in digits other than 0 to 9 is refused.
+4. **A line may not add a "not", a name or new words.** A line that says not, never, no, none, nothing, nobody, neither, nor, cannot or without, when none of its cited memories does, fails. A capitalised word in the middle of a line that is in none of its cited memories fails. A line that shares fewer than 2 content words with its cited memories fails. This check is a heuristic on words, not proof. It stops a claim that came from nowhere, and it cannot tell that a sentence turns a memory round. Read a brief as a summary written by a model.
+5. **At most 12 lines and 900 characters, and no line that reads as an order.**
+
+If one line fails, the whole new brief is thrown away, the old one stays, the subject shows as stale, and the reason is kept. So if Pip's brief says the vet visit is on 3 November, one of Pip's memories says so. If the model invents a weight for Pip, or writes "three dogs" where the memory says two, the brief is refused. A model that does not answer is counted for each subject. After 3 nights in a row the subject is stale with the reason `model.fail.3`, and a subject that failed is tried after the healthy ones.
+
+1. **Each build can be undone.** A built brief is a new version of the card, so you can undo it from the card's history. Clearing a brief is the one change that cannot be undone, see item 7.
+2. **Sources are linked.** The card gets a `derived_from` link to each memory its lines cite.
+3. **Pin a brief you wrote.** Saving a brief by hand, with `POST /subject/update` or when you make a subject with one, sets the field `brief_pinned` for you. A pinned brief is never rebuilt and the subject is never retired automatically. A pin does not keep text anymem built from memories, see item 7. Saving a brief by hand also removes the links a system build made from the card to the memories it cited, because your text cites nothing. Forgetting one of those memories later therefore leaves your brief and its history alone. A change of the subject's name does not do this, and neither does saving the same text again. Set the field yourself with `{"fields": {"brief_pinned": "yes"}}`, and remove it with `{"fields": {"brief_pinned": null}}` to hand the brief back to anymem. Every kind of subject can hold it.
+4. **The step.** It runs every night and builds at most 8 briefs, only while `SUBJECTS_BRIEFS` is on. It rebuilds a subject when one of its newest 20 members was changed, added or removed. A stale subject is tried again, after the healthy ones. It leaves 15 of the subrequests the nightly run has left when it starts for the merge step after it, so merge always has some, also on the Free budget of 40.
+5. **Retiring.** A project, an area or a topic with fewer than 3 live memories that has not changed for 60 days is retired. Accepting a proposal counts as a change, so a proposal you accept late is not retired the same night. A person, a pet or an asset is never retired this way, because they have few memories by nature. Its links stay, and you can make it active again.
+6. **Private subjects.** A private subject's brief is built from its own memories only. A memory that belongs to a private subject is never shown to the model when it builds a shared subject's brief.
+7. **An old brief never outlives the memories it came from.** When a memory a brief cites is forgotten, replaced or linked to a private subject, anymem blanks the brief in that moment, not at night. The card text, its `derived_from` links, every earlier version of the card that holds brief text, and the questions the search keeps about it all go, and the card is indexed again, so a device that may not see the memory cannot read the old text through the card, its history or a search. Text that must go is gone at once and everywhere, and a clear cannot be undone from the card's history. The subject shows as stale with the reason `members_changed`. A pinned brief and a retired subject are cleared too, because a pin does not protect text that must go. A memory that is only added to a subject or edited does not blank the brief. The next build replaces it, and if that build fails the old brief stays and the subject shows why it is stale. A forget, a replace and a link to a private subject blank the cards before the change they protect, and the request fails rather than succeed with text that is still readable. If a card cannot be blanked, the memory is not forgotten and the link is not made, and you can try again. A capture that would replace a cited memory and cannot blank the cards keeps both memories. Blanking does not need any of the switches, so text built earlier is still taken away if you turn them off. The nightly job checks again as a backup with its first step, `clear`, and only when a cited memory stopped being eligible.
+
+## What the nightly job does with this
+
+The step `clear` runs first, before everything else. It blanks briefs that cite a memory that may no longer feed them, at most 8 cards a night, whatever the switches say. The two subject steps are `cluster` and `briefs`. They run before `merge`, in the order cluster, briefs, merge, because merge keeps going until the shared subrequest budget is gone. The Health screen shows what each did. A step that reports `skipped: "off"` is working as designed, and the `briefs` step reports it while `SUBJECTS_BRIEFS` is off. A step that reports dropped `low_cohesion` often means the tag is too broad to be one subject. A group dropped for that reason shows as `recently_dropped` for the next week, and `waiting_full` means 25 proposals already wait for your click. A step that refuses shows its own reason when it gives one, for example the brief step says "the model did not answer", and the run is still not ok when the model is down.
+
+## What is not built
+
+Anymem does not yet propose a value for a subject's field, such as a vet or a birthday. It does not record decisions or state changes of a subject, and it does not look for contradictions between the memories of one subject. Those need a source of field values that does not exist yet. Linking, proposals and briefs are the whole of what runs on its own.

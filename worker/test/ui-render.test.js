@@ -9,7 +9,7 @@ import { ADDABLE_LINK_TYPES, linkForm } from "../ui/lib/drawer.js";
 import { capsuleText, capsuleView } from "../ui/screens/capsule.js";
 import { auditRows, stripView } from "../ui/screens/audit.js";
 import { backupsView, capacityView, capturesView, checksView, countsView, limitView, runsView } from "../ui/screens/health.js";
-import { askView, figuresView, growthView, headView, latestView, probationView, quietView, recallsView, sourcesView, statusView, toolRows, toolsView, toolTable, usageView } from "../ui/screens/home.js";
+import { askView, figuresView, growthView, headView, latestView, probationView, quietView, recallsView, sourcesView, statusView, subjectsWaitingView, toolRows, toolsView, toolTable, usageView } from "../ui/screens/home.js";
 import { pendingView, profileView } from "../ui/screens/people.js";
 import { listView as subjectListView, newForm, tableRow as subjectRow } from "../ui/screens/subjects.js";
 import { aliasForm, briefForm, fieldsForm, subjectView } from "../ui/lib/subject-drawer.js";
@@ -89,6 +89,8 @@ const hit = (t, over = {}) => ({
   why: { dense_score: 0.71, dense_rank: 1, keyword_rank: 2, keyword_terms: [{ term: t.script, level: 2, idf: 8 }, { term: t.img, level: 2, idf: 9 }], checks: checks(t) },
   ...over,
 });
+/** The links into a card as GET /links returns them: the first member was linked by the system, the second by a person. */
+const systemLinks = (t) => [{ type: "about", direction: "in", other_id: t.quote, other_name: t.script, made_by: "system", confidence: 0.8, created_at: NOW }, { type: "about", direction: "in", other_id: "m2", other_name: t.img, made_by: "user", confidence: null, created_at: NOW }];
 const days = (n, f) => Array.from({ length: n }, (_, i) => ({ day: `2026-10-${String(i + 1).padStart(2, "0")}`, ...f(i) }));
 
 /** Every view with data from one set of texts, as [name, markup] pairs. */
@@ -179,6 +181,9 @@ function views(t) {
     ["subjectView retired", subjectView(subject(t, { status: "retired", scope: "shared", aliases: [], fields: {}, brief: "" }), null, NOW, "#/subjects")],
     ["subjectView capped members", subjectView(subject(t, { member_count: 300 }), [], NOW, "#/subjects")],
     ["subjectView no members", subjectView(subject(t, { members: [], member_count: 0 }), [], NOW, "#/subjects")],
+    ["subjectView proposed", subjectView(subject(t, { status: "proposed", scope: "shared" }), systemLinks(t), NOW, "#/subjects")],
+    ["subjectsWaitingView", subjectsWaitingView([subject(t, { status: "proposed", member_count: 4 }), subject(t, { slug: "corolla", kind: "asset", status: "proposed", member_count: 1 })])],
+    ["subjectsWaitingView empty", subjectsWaitingView([])],
     ["briefForm", briefForm(subject(t))],
     ["fieldsForm", fieldsForm(subject(t))],
     ["aliasForm", aliasForm()],
@@ -231,7 +236,7 @@ test("no view lets store text add a tag or an attribute", () => {
   const nasty = views(EVIL);
   const benign = views(BENIGN);
   assert.equal(nasty.length, benign.length);
-  assert.ok(nasty.length >= 77, `${nasty.length} views are covered`);
+  assert.ok(nasty.length >= 80, `${nasty.length} views are covered`);
   nasty.forEach(([name, view], i) => {
     const got = parse(String(view), name);
     assert.deepEqual(got, parse(String(benign[i][1]), name), `${name} has different tags or attributes with hostile text`);
@@ -351,13 +356,15 @@ test("a link of a type outside the list shows as related, and its button still c
 
 test("a system link shows its confidence and offers Not this, and a user link offers Remove", () => {
   const sys = String(linksView([link({ made_by: "system", confidence: 0.82 })]));
-  assert.match(sys, /made by anymem/);
-  assert.match(sys, /82% sure/);
+  assert.match(sys, /made by the system, confidence 0\.82/);
   assert.match(sys, /data-action="unlink"[^>]*data-made-by="system">Not this/);
   const mine = String(linksView([link()]));
   assert.match(mine, /data-made-by="user">Remove/);
-  assert.doesNotMatch(mine, /made by anymem|sure/);
-  assert.doesNotMatch(String(linksView([link({ made_by: "system", confidence: null })])), /sure/, "a link without a confidence shows none");
+  assert.doesNotMatch(mine, /made by the system|confidence/);
+  const bare = String(linksView([link({ made_by: "system", confidence: null })]));
+  assert.match(bare, /made by the system</, "a link without a confidence says who made it and nothing more");
+  assert.doesNotMatch(bare, /confidence/, "and shows no confidence");
+  assert.match(String(linksView([link({ made_by: "system", confidence: 0.8 })])), /confidence 0\.80/, "a confidence is always two places");
 });
 
 test("the link form offers the closed list of types except the two the system writes", () => {
@@ -590,4 +597,37 @@ test("the memory drawer shows the subjects a memory is about as chips that open 
   const out = String(factsView(entry(BENIGN), null, NOW, [{ id: "c1", slug: "pip", name: "Pip" }]));
   assert.match(out, /<dt>Subjects<\/dt><dd><ul class="tags" aria-label="Subjects"><li><a href="#\/subjects\?subject=pip">Pip<\/a><\/li><\/ul>/);
   assert.doesNotMatch(String(factsView(entry(BENIGN), null, NOW)), /Subjects/, "a memory about nothing has no Subjects row");
+});
+
+test("a proposed subject says it waits for a click, offers Accept and Dismiss, and has no Retire", () => {
+  const out = String(subjectView(subject(BENIGN, { status: "proposed", scope: "shared" }), [], NOW, "#/subjects"));
+  assert.match(out, /Proposed, waiting for your click\./);
+  assert.match(out, /data-action="subject-accept">Accept</);
+  assert.match(out, /data-action="subject-dismiss">Dismiss</);
+  assert.doesNotMatch(out, /data-status="retired"/, "a proposal is dismissed, not retired");
+  const active = String(subjectView(subject(BENIGN, { scope: "shared" }), [], NOW, "#/subjects"));
+  assert.doesNotMatch(active, /waiting for your click|subject-accept|subject-dismiss/, "an active subject has no such buttons");
+  assert.match(active, /data-status="retired">Retire</);
+});
+
+test("a member the system linked shows its confidence and offers Not this, a member a person linked offers nothing", () => {
+  const out = String(subjectView(subject(BENIGN, { members: [{ id: "m1", name: "pip-vet", updated_at: NOW }, { id: "m2", name: "pip-food", updated_at: NOW }] }), [{ type: "about", direction: "in", other_id: "m1", other_name: "pip-vet", made_by: "system", confidence: 0.8 }, { type: "about", direction: "in", other_id: "m2", other_name: "pip-food", made_by: "user", confidence: null }], NOW, "#/subjects"));
+  const rows = out.match(/<tr data-id="m[12]">[\s\S]*?<\/tr>/g);
+  assert.equal(rows.length, 2);
+  assert.match(rows[0], /made by the system, confidence 0\.80/);
+  assert.match(rows[0], /data-action="subject-unlink" data-other="m1">Not this/);
+  assert.doesNotMatch(rows[1], /confidence|subject-unlink/);
+  assert.doesNotMatch(String(subjectView(subject(BENIGN), null, NOW, "#/subjects")), /subject-unlink/, "without the links nothing is known about who made a member");
+});
+
+test("the subjects waiting list names each subject with its kind and memory count, and has the three actions", () => {
+  const out = String(subjectsWaitingView([subject(BENIGN, { name: "Pip", slug: "pip", status: "proposed", member_count: 4 }), subject(BENIGN, { name: "The Corolla", slug: "corolla", kind: "asset", status: "proposed", member_count: 1 })]));
+  assert.match(out, /<h2 class="h2" id="subjects-wait-h">Subjects waiting for you<\/h2>/);
+  const rows = out.match(/<tr data-slug="[^"]+">[\s\S]*?<\/tr>/g);
+  assert.equal(rows.length, 2);
+  assert.match(rows[0], /Pip<span class="mem__desc">pip<\/span><\/th><td>pet<\/td><td class="num">4<\/td>/);
+  assert.match(rows[1], /The Corolla[\s\S]*<td>asset<\/td><td class="num">1<\/td>/);
+  for (const re of [/data-action="subject-accept" data-slug="pip">Accept/, /data-action="subject-dismiss" data-slug="pip">Dismiss/, /href="#\/subjects\?subject=pip">Open/]) assert.match(rows[0], re);
+  assert.doesNotMatch(out, /Undo/, "a dismissal has no undo in this phase");
+  assert.equal(String(subjectsWaitingView([])), "", "nothing waiting, nothing shown");
 });

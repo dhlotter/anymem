@@ -24,14 +24,23 @@ export function cleanLabel(value) {
 }
 
 /**
+ * The insert of one audit row, not yet run, so a caller can put several rows in one batch.
+ * With ifChanged the row is written only when the statement just before it in the same batch changed a row, so a link that was not
+ * made (it was there already, or refused) leaves no row that says it was.
  * @param {any} db
  * @param {{ts: number, actor: {kind: string, id: string}, harness: string, script: string, method: string, route: string, status: number, durationMs: number, memoryIds: string[]}} row
+ * @param {{ifChanged?: boolean}} [opts]
  */
+export function auditStatement(db, row, { ifChanged = false } = {}) {
+  const values = [row.ts, row.actor.kind, row.actor.id, cleanLabel(row.harness), cleanLabel(row.script), row.method.slice(0, 16), row.route.slice(0, MAX_ROUTE_CHARS), row.status, Math.max(0, Math.round(row.durationMs)), JSON.stringify(row.memoryIds.slice(0, MAX_IDS))];
+  const columns = "ts, actor_kind, actor_id, harness, script, method, route, status, duration_ms, memory_ids";
+  const sql = ifChanged ? `INSERT INTO audit (${columns}) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE changes() > 0` : `INSERT INTO audit (${columns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  return db.prepare(sql).bind(...values);
+}
+
+/** @param {any} db @param {Parameters<typeof auditStatement>[1]} row */
 export async function recordAudit(db, row) {
-  await db
-    .prepare("INSERT INTO audit (ts, actor_kind, actor_id, harness, script, method, route, status, duration_ms, memory_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(row.ts, row.actor.kind, row.actor.id, cleanLabel(row.harness), cleanLabel(row.script), row.method.slice(0, 16), row.route.slice(0, MAX_ROUTE_CHARS), row.status, Math.max(0, Math.round(row.durationMs)), JSON.stringify(row.memoryIds.slice(0, MAX_IDS)))
-    .run();
+  await auditStatement(db, row).run();
 }
 
 /** Delete rows older than the retention window and return how many went. */

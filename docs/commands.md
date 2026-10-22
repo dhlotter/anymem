@@ -20,7 +20,7 @@ Output goes to standard out and one line of trouble goes to standard error. Exit
 | `append.py`, `update.py`, `status.py` | change a memory |
 | `forget.py`, `restore.py`, `undo.py` | trash, bring back, revert |
 | `link.py`, `unlink.py`, `links.py` | link two memories, remove a link, list a memory's links |
-| `subject.py` | the things memories are about: list, show, add and change subjects |
+| `subject.py` | the things memories are about: list, show, add and change subjects. `accept` and `dismiss` decide a proposed subject and are the person's to run |
 | `profile.py`, `person.py` | the person's own facts, and the people they talk about |
 | `usage.py` | what memory adds to prompts |
 | `backup.py` | a local copy of the store |
@@ -93,28 +93,32 @@ One line per link, grouped by type: `type  out|in  other_id  other_name`. `out` 
 ### subject.py
 
 ```
-subject.py list [--kind KIND]
+subject.py list [--kind KIND] [--status STATUS]
 subject.py show SLUG
 subject.py add KIND SLUG NAME [--brief TEXT | --brief-file PATH]
 subject.py set SLUG FIELD VALUE
 subject.py alias SLUG NAME
 subject.py scope SLUG shared|private
 subject.py retire SLUG
+subject.py accept SLUG
+subject.py dismiss SLUG
 ```
 
 A subject is a thing memories are about. Its card is an ordinary memory that holds a short brief, plus a row with a kind, a status, a scope, fields and aliases. The Worker writes the card, so there is no script that writes one by hand. A memory is a member of a subject when a link of type `about` runs from the memory to the card (`link.py MEMORY CARD_ID about`). The kinds are `person`, `pet`, `asset`, `project`, `area` and `topic`.
 
 | Action | Meaning |
 |---|---|
-| `list` | One line per subject: `slug  kind  status  scope  N members  name`. `--kind` filters. `no subjects` when there are none. Retired subjects are listed too |
+| `list` | One line per subject: `slug  kind  status  scope  N members  name`. `--kind` and `--status` filter, and the status is `proposed`, `active`, `stale` or `retired`. `no subjects` when there are none. Retired subjects are listed too |
 | `show SLUG` | The slug, kind, status, scope and name, then the card id, the aliases, one `field: value` line per field, the brief, and the members (memory id and name), newest first |
 | `add KIND SLUG NAME` | Makes an active subject. The slug is 2 to 40 characters, lowercase letters and digits with single dashes. The name is up to 80 characters. The brief comes from `--brief`, or from `--brief-file`, where `-` reads standard input. Text between `<private>` tags is removed, and a brief that looks like it holds a secret is refused (exit 2) before anything is sent |
 | `set SLUG FIELD VALUE` | Sets one field. An empty VALUE removes it. The allowed fields depend on the kind (person: `relationship`, `known_as`, `work`, `contact`, `birthday`. pet: `name`, `species`, `breed`, `born`, `vet`, `status`, `health_note`. asset: `type`, `name`, `identifier`, `acquired`, `status`, `value_note`. project: `what`, `status`, `owner`, `repo`. area: `what`, `status`. topic: `what`). The Worker refuses any other field, and a value is up to 200 characters |
 | `alias SLUG NAME` | Adds another name the subject goes by, stored in lowercase |
 | `scope SLUG shared\|private` | A private subject, its card and the memories only about it are hidden from a device token whose device is set off with `devices.py allow-private`. Only the admin token or a browser login may change a scope |
 | `retire SLUG` | Marks the subject retired. Nothing is deleted |
+| `accept SLUG` | The person's click on a proposed subject. It becomes active, its card memory becomes active, and recall can offer it. It prints `accepted SLUG`. Any other status is refused by the Worker, 409 `not_proposed` |
+| `dismiss SLUG` | The person's click that turns a proposed subject down. It is retired, nothing is deleted, and the slug stays taken so the same proposal does not come back. It prints `dismissed SLUG` |
 
-Only the admin token and a browser login may write a card, so with a device token every change except reading is refused by the Worker with one plain line (exit 1). `list` and `show` work with a device token, and leave out a private subject the device may not see. See [recall](recall.md) for how a card reaches a prompt.
+The system can propose a subject on its own when `SUBJECTS_AUTO` is on (and write briefs when `SUBJECTS_BRIEFS` is on too), and `list --status proposed` shows what waits. `accept` and `dismiss` are for the person to run in their own terminal, never for an agent. See [subjects](subjects.md). Only the admin token and a browser login may write a card, so with a device token every change except reading is refused by the Worker with one plain line (exit 1). `list` and `show` work with a device token, and leave out a private subject the device may not see. See [recall](recall.md) for how a card reaches a prompt.
 
 ### backup.py
 
@@ -205,7 +209,7 @@ One line per check, then a verdict. Exit 0 when no check failed, warnings allowe
 | prerequisites | Python version, whether the `claude` command exists |
 | usage | counts from `GET /stats` (admin token), today's capture numbers and the last nightly job |
 | backup | the latest nightly backup, a warning when it is over 2 days old or the bucket is missing |
-| subjects | `N active, M private` from `GET /subjects`. No line at all when the Worker does not answer that route |
+| subjects | `3 active, 1 proposed, 0 stale, 0 private, auto on, briefs off` from `GET /subjects`. Proposed subjects wait for your click, and a stale subject has a brief that failed a check, whose memories changed, or that the model could not build 3 nights in a row. The last part says whether the system acts on subjects by itself, from the switches in `GET /stats` (admin token). It reads `auto off` when `SUBJECTS_AUTO` is not on, `auto on, briefs on` or `auto on, briefs off` for the third switch, `SUBJECTS_BRIEFS`, and `auto set but SUBJECTS is off, so it does nothing` when only the automation switch is set. A Worker that does not report the switches gets the counts and nothing more. No line at all when the Worker does not answer `GET /subjects` |
 | vector | with `--probe`, whether a probe vector is found through the metadata filter, waiting up to 3 minutes |
 
 `--json` prints the checks and the verdict as one object. The probe writes one vector and no memory, and waits up to 3 minutes.

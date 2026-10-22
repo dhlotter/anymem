@@ -15,6 +15,9 @@ export const HARNESSES = [
 /** The dashboard calls the Worker too, but it is a caller and never the harness of a memory. */
 export const DASHBOARD = { id: "dashboard", label: "Dashboard" };
 
+/** The Worker's own background work (assignment, proposals, clustering, briefs) writes audit rows as this caller. */
+export const SYSTEM = { id: "system", label: "Anymem" };
+
 const byName = new Map(HARNESSES.flatMap((h) => [h.id, ...h.aliases].map((name) => [name, h])));
 
 /** The row of a known id or alias, compared without regard to case. */
@@ -38,6 +41,7 @@ export function harnessLabel(harness, origin = "") {
 /** The label of a caller in the audit trail, which may also be the dashboard. A blank one sent no name. */
 export function callerLabel(name) {
   if (name === DASHBOARD.id) return DASHBOARD.label;
+  if (name === SYSTEM.id) return SYSTEM.label;
   return knownHarness(name)?.label ?? (name ? String(name) : "Unknown");
 }
 

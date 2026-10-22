@@ -4,13 +4,14 @@ import { isMissingRoute } from "../lib/api.js";
 import { chartTable, growthBuckets, legend, stackedBars } from "../lib/chart.js";
 import { mountChart } from "../lib/chart-dom.js";
 import { emptyState, icon, memoryLink, originChip, segmented, shareBar, stateMark } from "../lib/components.js";
-import { attempt, onAction, onChange, onSubmit, formValues, show } from "../lib/dom.js";
+import { attempt, notify, onAction, onChange, onSubmit, formValues, show, unsay } from "../lib/dom.js";
 import { against, ago, count, formatNumber, greeting, longDate, percent, shortDay, titleOf, truncate } from "../lib/format.js";
 import { html } from "../lib/html.js";
 import { quietSentence } from "../lib/harness.js";
 import { mountDrawer } from "../lib/drawer.js";
 import { ariaSort, sorter } from "../lib/grid.js";
 import { hashFor } from "../lib/route.js";
+import { subjectHref } from "../lib/subjects.js";
 
 export const title = "Home";
 
@@ -39,6 +40,20 @@ export function statusView(home) {
     <ul class="issues">${bad.map((c) => html`<li>${stateMark(c.state)}<span class="issues__label">${c.label}</span><span class="issues__detail">${c.detail}</span><a class="link" href="${c.href}">Open</a></li>`)}</ul>
     <p class="muted status__rest">${rest.length === 1 ? "The other check is fine." : `The other ${rest.length} checks are fine.`}</p>${table}</section>`;
 }
+
+/**
+ * The subjects the system proposed, one line each: the name, the kind, how many memories back it, and what you can do. Accept puts it in
+ * recall, Dismiss keeps it from coming back (there is no undo), Open shows it in the subject drawer. Nothing at all when none is waiting.
+ */
+export const subjectsWaitingView = (subjects) =>
+  subjects.length
+    ? html`<section class="decide" aria-labelledby="subjects-wait-h"><h2 class="h2" id="subjects-wait-h">Subjects waiting for you</h2>
+      <p class="muted panel__sum">${count(subjects.length, "subject")} anymem noticed ${subjects.length === 1 ? "has" : "have"} not been added yet. Accept one to let recall offer it. Dismiss keeps it from coming back.</p>
+      <div class="scroll" tabindex="0" role="region" aria-label="Subjects waiting for you"><table class="data data--grid data--decide"><caption class="sr">Subjects waiting for you, with how many memories back each one</caption>
+      <thead><tr><th scope="col" class="th">Subject</th><th scope="col" class="th">Kind</th><th scope="col" class="th num">Memories</th><th scope="col" class="th"><span class="sr">Actions</span></th></tr></thead>
+      <tbody>${subjects.map((s) => html`<tr data-slug="${s.slug}"><th scope="row" class="mem__cell">${s.name}<span class="mem__desc">${s.slug}</span></th><td>${s.kind}</td><td class="num">${formatNumber(s.member_count)}</td>
+        <td class="cell__act"><button type="button" class="btn btn--primary" data-action="subject-accept" data-slug="${s.slug}">Accept<span class="sr"> ${s.name}</span></button> <button type="button" class="btn" data-action="subject-dismiss" data-slug="${s.slug}">Dismiss<span class="sr"> ${s.name}</span></button> <a class="btn btn--quiet" href="${subjectHref(s.slug)}">Open<span class="sr"> ${s.name}</span></a></td></tr>`)}</tbody></table></div></section>`
+    : "";
 
 /** The week: one big figure and a ledger of three rows. */
 export function figuresView(h) {
@@ -194,7 +209,7 @@ export function mount(root, ctx, arg) {
   let tab = "growth";
   let probSort = "left";
   let seq = 0; // the newest range request, so a slow older one cannot draw the wrong range
-  const view = { growth: null, recalls: null, harnesses: null, probation: null };
+  const view = { growth: null, recalls: null, harnesses: null, probation: null, proposed: [] };
   const tables = { growth: false, recalls: false };
   show(root, html`<div data-status></div><div data-page><p class="muted loading" role="status">Loading</p></div>`);
   const status = root.querySelector("[data-status]");
@@ -211,17 +226,21 @@ export function mount(root, ctx, arg) {
     charts.recalls = mountChart(hostOf("recalls").querySelector('[data-plot="recalls"]'), (w) => recallsChart(view.recalls, w));
   }
 
+  /** The proposed subjects. A Worker without subjects has none to show, and the status is checked here too in case a Worker ignores the filter. */
+  const askedFor = () => ctx.request("/subjects?status=proposed").then((r) => (r.subjects ?? []).filter((s) => s.status === "proposed")).catch((err) => (isMissingRoute(err) ? [] : Promise.reject(err)));
+
   async function load() {
     const got = await attempt(status, async () => {
-      const [home, growth, recalls, probation, latest, harnesses] = await Promise.all([
+      const [home, growth, recalls, probation, latest, harnesses, proposed] = await Promise.all([
         ctx.shell.refresh(), // null when the first read failed, the rest of the page still shows
         ctx.request(`/ui/api/growth?days=${range}`),
         ctx.request("/ui/api/recalls"),
         ctx.request("/ui/api/probation"),
         ctx.request("/list?n=6").catch((err) => (isMissingRoute(err) ? { entries: [] } : Promise.reject(err))),
         ctx.request("/ui/api/harnesses").catch((err) => (isMissingRoute(err) ? null : Promise.reject(err))), // a Worker without it simply has no harness panels
+        askedFor().catch(() => []), // a failed list leaves the section out, it never takes the page down
       ]);
-      return { home, growth, recalls, probation, latest, harnesses };
+      return { home, growth, recalls, probation, latest, harnesses, proposed };
     });
     if (!got) return;
     const now = ctx.now();
@@ -229,8 +248,10 @@ export function mount(root, ctx, arg) {
     view.recalls = got.recalls;
     view.harnesses = got.harnesses;
     view.probation = got.probation;
+    view.proposed = got.proposed;
     const chips = got.recalls.most_recalled.slice(0, 2).map((m) => m.title);
     show(page, html`${headView(got.home, chips, now)}${got.home ? statusView(got.home) : html`<p class="notice notice--error" role="alert">${icon("fail")}<span>The status line and the week in numbers could not be read. Reload to try again.</span></p>`}
+      <div data-waiting>${subjectsWaitingView(view.proposed)}</div>
       <div class="week">${got.home ? figuresView(got.home.headline) : ""}${latestView(got.latest.entries, now)}</div>
       <nav class="tabs" aria-label="More about your memories">${segmented("tab", "Section", TABS.map(([v, l]) => [v, v === "probation" && got.probation.total ? `${l} ${formatNumber(got.probation.total)}` : l]), tab, "tab")}</nav>
       <div class="tabbody" data-tabbody></div>`);
@@ -250,6 +271,32 @@ export function mount(root, ctx, arg) {
     show(body, parts[tab]());
     if (tab === "growth") drawGrowth();
     if (tab === "recall") drawRecalls();
+  }
+
+  /** Accept or dismiss one proposal, then read the list again. The sidebar count follows from the changed event. Both buttons of the row stay off while the request is on its way. */
+  const answering = new Set();
+  async function decide(el, path, message) {
+    const slug = el.dataset.slug;
+    if (answering.has(slug)) return; // a double click, or Dismiss after Accept on the same row
+    answering.add(slug);
+    const buttons = [...(el.closest("tr")?.querySelectorAll("button") ?? [el])];
+    for (const b of buttons) b.disabled = true;
+    try {
+      if (!(await attempt(status, () => ctx.request(path, { method: "POST", body: { slug } })))) {
+        for (const b of buttons) b.disabled = false;
+        return;
+      }
+      unsay(status); // an earlier failure is not true any more
+      dispatchEvent(new Event("anymem:changed"));
+      notify(message);
+      const next = await attempt(status, askedFor);
+      if (next) {
+        view.proposed = next;
+        show(page.querySelector("[data-waiting]"), subjectsWaitingView(next));
+      }
+    } finally {
+      answering.delete(slug);
+    }
   }
 
   onChange(root, {
@@ -278,6 +325,12 @@ export function mount(root, ctx, arg) {
     sort(el) {
       probSort = el.dataset.sort;
       drawTab();
+    },
+    async "subject-accept"(el) {
+      await decide(el, "/subject/accept", "Accepted. Recall can offer it now.");
+    },
+    async "subject-dismiss"(el) {
+      await decide(el, "/subject/dismiss", "Dismissed. anymem will not propose it again."); // there is no undo, the slug stays taken
     },
     chip: (el) => (location.hash = hashFor("search", { params: { q: el.dataset.q } })),
     "remember-box": () => ctx.shell.openRemember(root.querySelector('input[name="text"]').value.trim()),

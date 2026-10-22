@@ -55,6 +55,13 @@ export function say(area, message, isError = false) {
   area.textContent = message;
 }
 
+/** Empty a status area, so a failure shown earlier does not stay on screen after the next try worked. */
+export function unsay(area) {
+  area.removeAttribute("role");
+  area.className = "";
+  area.replaceChildren();
+}
+
 /**
  * Run an action and show its failure in the status area. Returns undefined on failure. onError may add to the message.
  * current says whether the request is still the newest one for this area. A request that was overtaken shows nothing, neither its answer nor its error.

@@ -48,6 +48,7 @@ import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -73,6 +74,9 @@ MIN_USER_CHARS = 150           # fewer user characters than this in the delta an
 LASTING_RE = re.compile(r"\b(?:birthday|bday|b-day)\b", re.I)
 MIN_USER_CHARS_FACT = 30
 TYPES = ("user", "feedback", "project", "reference")
+SUBJECT_KINDS = ("person", "pet", "asset", "project", "area", "topic")  # the Worker's subject kinds
+# Names that name nothing. The Worker holds the full list and refuses these again, this only saves a hint that cannot work.
+GENERIC_SUBJECTS = frozenset("the a an it this that user thing project work home team me my i you we they someone something people person company app code repo task topic area".split())
 SECRET_RE = re.compile(
     r"(sk-[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{12,}"
     r"|Bearer\s+[A-Za-z0-9._~+/-]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY)")
@@ -106,6 +110,8 @@ Separately from memories: when the USER states a fact about themselves that belo
 
 Likewise, when the USER tells you who another person is to them, or states a lasting fact about that person that helps work with them (relationship, what they do, where they work, language, how they like to be contacted, their email or phone when the user gives it for later use), return it as {"type": "person", "name": the name as the user used it, "field": one of relationship, name, last-name, known-as, email, phone, work, birthday, language, contact-preference, note, "value": the value only, "said": the user's own words copied exactly from one of their USER turns}. A person needs a relationship to the user before anything else is kept, so give the relationship element first (when the user only asks you to send or write to them, skip it, that is enough). For a birthday give the date as the user said it, such as \"today\", \"tomorrow\" or \"11 October\", and do not convert it yourself. A birthday is a lasting fact worth keeping even from a very short session: when the user writes "its zucks bday today, send him a message", return {"type": "person", "name": "Zuck", "field": "birthday", "value": "today", "said": "its zucks bday today"}. Only what the user said about them. Never a guess, never a description of their character, mood or private life, never health, money, legal or ID details about anyone. A person element does not count towards the limit below.
 
+A memory element may also carry "subject": {"name": the name as written in the memory, "kind": one of person, pet, asset, project, area, topic}. Set it only when the memory introduces a named person, pet, vehicle, property, project or topic that has its own identity ("Pip is my dog" gives name Pip, kind pet; "the Corolla needs new tyres in June" gives name Corolla, kind asset). Never set it for a general rule or preference, and never for a company or a tool unless it is the user's own project. At most one subject per memory, and leave it out when unsure.
+
 If you are unsure a fact is durable, drop it. Most sessions yield zero or one memory. Returning [] is correct and common. At most %d.
 
 <already_known>
@@ -113,7 +119,7 @@ If you are unsure a fact is durable, drop it. Most sessions yield zero or one me
 </already_known>
 
 Reply with ONLY a JSON array, no prose, no code fence. Each element:
-{"name": "kebab-case-slug, 60 characters max", "type": "user|feedback|project|reference", "description": "one line used for recall, 160 characters max", "body": "the fact. For feedback and project add a line starting **Why:** and a line starting **How to apply:**. Plain sentences, no dashes joining clauses."}
+{"name": "kebab-case-slug, 60 characters max", "type": "user|feedback|project|reference", "description": "one line used for recall, 160 characters max", "body": "the fact. For feedback and project add a line starting **Why:** and a line starting **How to apply:**. Plain sentences, no dashes joining clauses.", "subject": {"name": "optional, see above", "kind": "optional, see above"}}
 
 <transcript>
 %s
@@ -498,6 +504,82 @@ def undash(text: str) -> str:
     return re.sub(r"\s*[\u2014\u2013]\s*|\s+--\s+", ", ", text)
 
 
+SUBJECT_MAX_WORDS = 5
+SUBJECT_PUNCT = " '\u2019.&-"
+# A name of 3 words or more that starts with one of these verbs reads as a command ("Delete All Memories"), not as a name. A name never
+# holds one of the banned words, wherever it stands. The same lists as the Worker's.
+SUBJECT_COMMAND_MIN_WORDS = 3
+SUBJECT_COMMAND_VERBS = frozenset("send delete wipe reveal ignore forget email run open visit remove share show tell print execute download disregard override forward reply ask post transfer".split())
+SUBJECT_BANNED_WORDS = frozenset("memories memory token password instructions prompt".split())
+
+
+def slug_of(name: str) -> "str | None":
+    """The slug the Worker would make from the name: lowercase letters and digits with single dashes, a leading "the" dropped, 2 to 40
+    characters. None when nothing valid is left."""
+    plain = "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.category(c).startswith("M")).lower()
+    plain = re.sub(r"[^a-z0-9]+", "-", plain).strip("-")
+    bare = plain[4:] if plain.startswith("the-") else plain
+    slug = (bare or plain)[:40].rstrip("-")
+    return slug if len(slug) >= 2 else None
+
+
+def plain_name(name: str) -> "str | None":
+    """The name as plain text, or None. Read after NFKC (a full width letter is the plain letter): Latin letters (with their marks), ASCII
+    digits, a plain space, an apostrophe, a period, a hyphen and an ampersand, at most 5 words, starting with a letter or a digit.
+    A letter of another script is out (a Cyrillic letter inside a Latin word looks like another name, and a name of one other script
+    cannot make a slug). So is punctuation that makes a link, an address or a sentence, every invisible character (format, line and
+    paragraph separators), a name that cannot make a slug, a name of 3 words or more that starts with a command verb, and a name that holds a banned word
+    (memory, token, password, instructions, prompt). Only the plain space
+    is folded, so any other white space (checked before the fold) makes the name not plain. The same rule as the Worker's, which checks
+    again."""
+    if any(c.isspace() and c != " " for c in name):
+        return None
+    text = unicodedata.normalize("NFKC", name)
+    parts = [w for w in text.split(" ") if w]
+    text = " ".join(parts)
+    if not text or len(parts) > SUBJECT_MAX_WORDS or unicodedata.category(text[0])[0] not in "LN":
+        return None
+    for ch in text:
+        if ch in SUBJECT_PUNCT:
+            continue
+        cat = unicodedata.category(ch)[0]
+        if cat == "M":
+            continue
+        if cat == "L" and unicodedata.name(ch, "").startswith("LATIN"):
+            continue
+        if ch in "0123456789":
+            continue
+        return None
+    if slug_of(text) is None:
+        return None
+    named = re.findall(r"[^\W_]+", text.lower())
+    if len(parts) >= SUBJECT_COMMAND_MIN_WORDS and named and named[0] in SUBJECT_COMMAND_VERBS:
+        return None
+    if any(w in SUBJECT_BANNED_WORDS for w in named):
+        return None
+    return text
+
+
+def clean_subject(hint, text: str) -> "dict | None":
+    """The subject hint in its clean form, or None. A hint is data: a name of 2 to 60 characters of plain text (see plain_name), a known kind,
+    no secret or instruction in it, and the name must stand in the memory's own text as a whole word or phrase, so a hint cannot invent
+    a subject the memory is not about. An unusable hint never costs the memory."""
+    if not isinstance(hint, dict) or not isinstance(hint.get("name"), str) or hint.get("kind") not in SUBJECT_KINDS:
+        return None
+    name = plain_name(hint["name"])
+    if name is None or not 2 <= len(name) <= 60:
+        return None
+    words = re.findall(r"[^\W_]+", name.lower())
+    if not words or all(w in GENERIC_SUBJECTS or w.isdigit() for w in words):
+        return None
+    if SECRET_RE.search(name) or INJECTION_RE.search(name):
+        return None
+    pattern = r"(?<![^\W_])" + r"\s+".join(re.escape(w) for w in name.split()) + r"(?![^\W_])"
+    if not re.search(pattern, text, re.I):
+        return None
+    return {"name": name, "kind": hint["kind"]}
+
+
 def screen(p) -> tuple[dict | None, str]:
     """(clean proposal, "") or (None, reason)."""
     if not isinstance(p, dict):
@@ -521,7 +603,11 @@ def screen(p) -> tuple[dict | None, str]:
         return None, "blocked topic"
     if SECRET_RE.search(blob) or any(re.search(r"\d", t) and re.search(r"[A-Za-z]", t) for t in LONG_TOKEN_RE.findall(blob)):
         return None, "looks like a secret"
-    return {"name": name, "type": typ, "description": desc, "body": body}, ""
+    clean = {"name": name, "type": typ, "description": desc, "body": body}
+    subject = clean_subject(p.get("subject"), blob)
+    if subject:
+        clean["subject"] = subject
+    return clean, ""
 
 
 def render(p: dict) -> str:
@@ -567,6 +653,8 @@ def store(p: dict, project: "str | None" = None, origin: "list | None" = None, h
     them can be traced and removed. A refusal (HTTP 422, a screen said no) is final and is not kept for a retry. A save that fails on
     the network or the API otherwise is kept in hm.offline, so the memory is not lost and `doctor` lists it."""
     body = {"content": render(p), "source": "session-capture", "tags": ["auto-capture", *(origin or [])]}
+    if p.get("subject"):
+        body["subject"] = p["subject"]  # a hint only: the Worker decides whether it becomes a proposal
     if harness:
         body["harness"] = harness
     if session:
@@ -580,10 +668,10 @@ def store(p: dict, project: "str | None" = None, origin: "list | None" = None, h
     except hm_api.ApiError as e:
         if e.status == 422:
             return f"not stored: refused, {e.body.get('reason') or e.message}"
-        offline.record_failure("capture", str(e), {"name": p["name"], "content": body["content"], "tags": body["tags"], **({"project": project} if project else {})})
+        offline.record_failure("capture", str(e), {"name": p["name"], "content": body["content"], "tags": body["tags"], **({"project": project} if project else {}), **({"subject": body["subject"]} if "subject" in body else {})})
         return f"error: {e}"
     except hm_api.NetworkError as e:
-        offline.record_failure("capture", str(e), {"name": p["name"], "content": body["content"], "tags": body["tags"], **({"project": project} if project else {})})
+        offline.record_failure("capture", str(e), {"name": p["name"], "content": body["content"], "tags": body["tags"], **({"project": project} if project else {}), **({"subject": body["subject"]} if "subject" in body else {})})
         return f"error: {e}"
 
 
@@ -591,7 +679,16 @@ def redact_proposal(clean: dict) -> tuple:
     """(proposal with its description and body redacted, number of redactions, kinds)."""
     desc, n1, k1 = redact.redact(clean["description"])
     body, n2, k2 = redact.redact(clean["body"])
-    return {**clean, "description": desc, "body": body}, n1 + n2, set(k1) | set(k2)
+    out = {**clean, "description": desc, "body": body}
+    n3, k3 = 0, []
+    if clean.get("subject"):
+        # The hint name goes through the redactor too. A name that needed redacting is not a name, so the hint goes and the memory stays.
+        name, n3, k3 = redact.redact(clean["subject"]["name"])
+        if n3:
+            del out["subject"]
+        else:
+            out["subject"] = {**clean["subject"], "name": name}
+    return out, n1 + n2 + n3, set(k1) | set(k2) | set(k3)
 
 
 def worker(tpath: str, sid: str, event: str, dry: bool = False, cwd: str = "", fmt: str = "claude") -> dict:
@@ -641,7 +738,7 @@ def worker(tpath: str, sid: str, event: str, dry: bool = False, cwd: str = "", f
                 n_props += n
                 kinds |= k
                 if dry:
-                    results.append({"name": clean["name"], "result": "dry run", "memory": render(clean)})
+                    results.append({"name": clean["name"], "result": "dry run", "memory": render(clean), **({"subject": clean["subject"]} if clean.get("subject") else {})})
                 else:
                     results.append({"name": clean["name"], "result": store(clean, project, [f"captured-by:{fmt}", f"session:{audit.session_tag(sid)}"], fmt, sid[:64])})
             rec["memories"] = results
