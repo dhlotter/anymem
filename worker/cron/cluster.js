@@ -44,7 +44,7 @@ const PROPOSE_COST = 10;
 
 // Tags the system writes by itself say where a memory came from, not what it is about. A project tag is held in the
 // project column (the parser lifts it out of the tags), and status and kind are reserved the same way.
-const AUTO_TAG = /^(auto-capture|subject|subject:.*|subject-kind:.*|captured-by:.*|session:.*|status:.*|project:.*|capsule:.*|capsule-slot:.*)$/;
+const AUTO_TAG = /^(auto-capture|duplicate-candidate|subject|subject:.*|subject-kind:.*|captured-by:.*|session:.*|status:.*|project:.*|capsule:.*|capsule-slot:.*)$/;
 const TAG = /^[a-z][a-z0-9-]*$/;
 const TOKEN = /^[a-z][a-z0-9]*$/;
 
@@ -168,6 +168,22 @@ function isTaken(taken, slug) {
   return false;
 }
 
+/**
+ * A group built from a leading name word is named by two words when 4 in 5 of its memories share the second word as well
+ * (paper-past-publish-slot and paper-past-captions give paper-past, not paper). Otherwise it keeps the one word.
+ */
+function twoWordName(g) {
+  if (g.source !== "token") return g;
+  const second = new Map();
+  for (const m of g.members) {
+    const rest = (m.name ?? "").toLowerCase().startsWith(`${g.slug}-`) ? (m.name ?? "").toLowerCase().slice(g.slug.length + 1).split(/[^\p{L}\p{N}]+/u)[0] : "";
+    if (rest && rest.length >= MIN_TOKEN && TOKEN.test(rest) && !STOP.has(rest)) second.set(rest, (second.get(rest) ?? 0) + 1);
+  }
+  const [word, n] = [...second.entries()].sort((a, b) => b[1] - a[1])[0] ?? [];
+  const slug = word && n / g.members.length >= 0.8 ? slugOf(`${g.slug}-${word}`) : null;
+  return slug ? { ...g, slug, name: slug } : g;
+}
+
 /** Groups of memories by shared project, plain tag and leading name word. A group with one slug can have several signals. */
 function groupUp({ memories, tags }) {
   const byId = new Map(memories.map((m) => [m.id, m]));
@@ -199,6 +215,7 @@ function groupUp({ memories, tags }) {
       // newest first, which is also the order the cohesion sample is taken in
       members: [...g.ids].map((id) => byId.get(id)).sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? 1 : -1)),
     }))
+    .map(twoWordName)
     .sort((a, b) => b.members.length - a.members.length || (a.slug < b.slug ? -1 : 1));
 }
 
