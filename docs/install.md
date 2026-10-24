@@ -91,6 +91,8 @@ setup.py --dry-run --name demo --access --email you@example.com
 
 ### What it creates, in order
 
+The resources as one table, what setup never creates, and how to run without a domain are in [Cloudflare resources](cloudflare.md).
+
 1. **Preflight.** Prints what you need, reads the token, picks the account and checks one permission at a time.
 2. **D1 database** `NAME-db`. The migrations in `worker/db/migrations` are applied, and the version is kept in the `meta` table, so a rerun applies nothing twice.
 3. **Vectorize index** `NAME-vectors`, 384 dimensions, cosine.
