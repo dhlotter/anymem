@@ -166,9 +166,10 @@ The full table with the plan notes is in [limits](docs/limits.md).
 13. [Troubleshooting](docs/troubleshooting.md)
 14. [Add a harness](docs/add-a-harness.md)
 15. [Limits and costs](docs/limits.md)
-16. [Benchmark](docs/benchmark.md)
-17. [Why scripts and hooks, not MCP](docs/why-skill-not-mcp.md)
-17. [The Worker, its routes, settings and internals](worker/README.md) and [worker/ARCHITECTURE.md](worker/ARCHITECTURE.md)
+16. [Cloudflare resources, and running without a domain](docs/cloudflare.md)
+17. [Benchmark](docs/benchmark.md)
+18. [Why scripts and hooks, not MCP](docs/why-skill-not-mcp.md)
+19. [The Worker, its routes, settings and internals](worker/README.md) and [worker/ARCHITECTURE.md](worker/ARCHITECTURE.md)
 
 ## License
 
