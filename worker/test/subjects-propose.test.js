@@ -15,7 +15,7 @@ const FAKE_KEY = "AKIA" + "ABCDEFGHIJKLMNOP";
 
 /** Plain objects, so a result can be compared with deepEqual. */
 const rows = async (...args) => (await plainRows(...args)).map((r) => ({ ...r }));
-const ON = { SUBJECTS: "on", SUBJECTS_AUTO: "on" };
+const ON = { SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_HINT_MENTIONS: "1" };
 const PIP = "Pip is my dog, a small brown beagle who hates thunder.";
 const PIP_HINT = { name: "Pip", kind: "pet" };
 const post = (app, path, body, opts = {}) => app.call(path, { method: "POST", body, ...opts });
@@ -34,8 +34,8 @@ async function proposed(env = ON) {
 }
 
 test("autoOn needs both flags", () => {
-  assert.equal(autoOn({ SUBJECTS: "on", SUBJECTS_AUTO: "on" }), true);
-  for (const env of [{}, { SUBJECTS: "on" }, { SUBJECTS_AUTO: "on" }, { SUBJECTS: "on", SUBJECTS_AUTO: "off" }, { SUBJECTS: "off", SUBJECTS_AUTO: "on" }]) assert.equal(autoOn(env), false, JSON.stringify(env));
+  assert.equal(autoOn({ SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_HINT_MENTIONS: "1" }), true);
+  for (const env of [{}, { SUBJECTS: "on" }, { SUBJECTS_AUTO: "on", SUBJECTS_HINT_MENTIONS: "1" }, { SUBJECTS: "on", SUBJECTS_AUTO: "off" }, { SUBJECTS: "off", SUBJECTS_AUTO: "on", SUBJECTS_HINT_MENTIONS: "1" }]) assert.equal(autoOn(env), false, JSON.stringify(env));
 });
 
 // ---------------------------------------------------------------- a hint makes a proposal
@@ -251,7 +251,7 @@ test("a proposal costs a handful of subrequests, however much evidence it has", 
 // ---------------------------------------------------------------- flags and the hint on /capture
 
 test("with either flag off a hint creates nothing and the memory is saved as usual", async () => {
-  for (const env of [{}, { SUBJECTS: "on" }, { SUBJECTS_AUTO: "on" }, { SUBJECTS: "on", SUBJECTS_AUTO: "off" }]) {
+  for (const env of [{}, { SUBJECTS: "on" }, { SUBJECTS_AUTO: "on", SUBJECTS_HINT_MENTIONS: "1" }, { SUBJECTS: "on", SUBJECTS_AUTO: "off" }]) {
     const app = await createApp({ env });
     const res = await put(app, PIP, { subject: PIP_HINT });
     assert.equal(res.status, 200, JSON.stringify(env));
@@ -294,11 +294,83 @@ test("only a capture or explicit write may carry a hint", async () => {
   assert.deepEqual((await subjectRows(app)).map((s) => s.slug), ["pip"], "a session capture does");
 });
 
-test("a hint for a subject that already exists makes no second one", async () => {
-  const { app } = await proposed();
+test("a hint for a subject that already exists makes no second one, its memory becomes more evidence for the first", async () => {
+  const { app, subject } = await proposed();
   assert.equal((await put(app, "Pip chewed the cushion again, a small beagle with a big appetite.", { subject: PIP_HINT })).status, 200);
   assert.equal((await subjectRows(app)).length, 1);
-  assert.equal((await rows(app, "SELECT COUNT(*) AS n FROM audit WHERE route = 'propose.subject'"))[0].n, 1);
+  assert.equal((await linksTo(app, subject.id)).length, 2);
+  assert.equal((await rows(app, "SELECT COUNT(*) AS n FROM audit WHERE route = 'propose.subject'"))[0].n, 2, "one for the proposal and one for the added memory");
+});
+
+// ---------------------------------------------------------------- noise: how many mentions make a proposal, and one thing under two names
+
+const DEFAULT_ON = { SUBJECTS: "on", SUBJECTS_AUTO: "on" };
+const candidateNames = async (app) => Object.keys(JSON.parse((await rows(app, "SELECT value FROM meta WHERE key = 'hint_candidates'"))[0]?.value ?? "{}"));
+
+test("by default the first memory that names a subject only remembers it, the second makes the proposal with both as evidence", async () => {
+  const app = await createApp({ env: DEFAULT_ON });
+  const first = (await put(app, "Pip is my dog, a small brown beagle who hates thunder.", { subject: PIP_HINT })).json;
+  assert.equal((await subjectRows(app)).length, 0, "one mention is not a subject");
+  assert.deepEqual(await candidateNames(app), ["pip"]);
+  const second = (await put(app, "Pip needs a walk before the rain starts, the beagle gets restless.", { subject: PIP_HINT })).json;
+  const [subject] = await subjectRows(app);
+  assert.equal(subject.slug, "pip");
+  assert.equal(subject.status, "proposed");
+  assert.deepEqual((await linksTo(app, subject.id)).map((l) => l.source_id).sort(), [first.id, second.id].sort());
+  assert.deepEqual(await candidateNames(app), [], "the remembered mention is forgotten once it is a proposal");
+});
+
+test("the same memory twice is one mention, not two", async () => {
+  const app = await createApp({ env: DEFAULT_ON });
+  await put(app, "Pip is my dog, a small brown beagle who hates thunder.", { subject: PIP_HINT });
+  const memory = (await rows(app, "SELECT id FROM memories WHERE origin = 'explicit' LIMIT 1"))[0].id;
+  const res = await proposeFromHint(app.env, { memoryId: memory, hint: PIP_HINT, now: clock(app) });
+  assert.deepEqual([res.ok, res.reason], [false, "waiting"]);
+  assert.equal((await subjectRows(app)).length, 0);
+});
+
+test("a remembered mention is forgotten after 14 days", async () => {
+  const app = await createApp({ env: DEFAULT_ON });
+  await put(app, "Pip is my dog, a small brown beagle who hates thunder.", { subject: PIP_HINT });
+  app.clock.t += 15 * 24 * 60 * 60 * 1000;
+  await put(app, "Pip needs a walk before the rain starts, the beagle gets restless.", { subject: PIP_HINT });
+  assert.equal((await subjectRows(app)).length, 0, "the first mention had expired, so this one is a first mention again");
+  assert.deepEqual(await candidateNames(app), ["pip"]);
+});
+
+test("SUBJECTS_HINT_MENTIONS sets how many, 1 proposes at once, and a bad value means 2", async () => {
+  const three = await createApp({ env: { ...DEFAULT_ON, SUBJECTS_HINT_MENTIONS: "3" } });
+  for (const text of ["Pip is my dog, a small brown beagle.", "Pip needs a walk before the rain starts.", "Pip ate half a sandwich off the counter."]) {
+    assert.equal((await subjectRows(three)).length, 0);
+    await put(three, text, { subject: PIP_HINT });
+  }
+  assert.equal((await subjectRows(three)).length, 1, "the third mention");
+  const one = await createApp({ env: { ...DEFAULT_ON, SUBJECTS_HINT_MENTIONS: "1" } });
+  await put(one, "Pip is my dog, a small brown beagle who hates thunder.", { subject: PIP_HINT });
+  assert.equal((await subjectRows(one)).length, 1);
+  for (const bad of ["0", "9", "x", ""]) {
+    const app = await createApp({ env: { ...DEFAULT_ON, SUBJECTS_HINT_MENTIONS: bad } });
+    await put(app, "Pip is my dog, a small brown beagle who hates thunder.", { subject: PIP_HINT });
+    assert.equal((await subjectRows(app)).length, 0, `${JSON.stringify(bad)} falls back to 2`);
+  }
+});
+
+test("a hint for the same thing under another name adds to the proposal that waits, by whole words of the slug", async () => {
+  const app = await createApp({ env: { ...DEFAULT_ON, SUBJECTS_HINT_MENTIONS: "1" } });
+  await put(app, "The LG TV in the lounge is a 55 inch model with a webOS remote.", { subject: { name: "LG TV", kind: "asset" } });
+  const [tv] = await subjectRows(app);
+  await put(app, "The LG webOS TV needs its firmware updated through the settings menu.", { subject: { name: "LG webOS TV", kind: "asset" } });
+  await put(app, "A Corolla is parked outside, a silver sedan the family drives.", { subject: { name: "Corolla", kind: "asset" } });
+  assert.deepEqual((await subjectRows(app)).map((r) => r.slug).sort(), ["corolla", "lg-tv"], "the second TV name made no new proposal");
+  assert.equal((await linksTo(app, tv.id)).length, 2);
+});
+
+test("a hint is not merged into a subject that is already active, only into one that waits", async () => {
+  const app = await createApp({ env: { ...DEFAULT_ON, SUBJECTS_HINT_MENTIONS: "1" } });
+  await put(app, "The LG TV in the lounge is a 55 inch model with a webOS remote.", { subject: { name: "LG TV", kind: "asset" } });
+  assert.equal((await post(app, "/subject/accept", { slug: "lg-tv" })).status, 200);
+  await put(app, "The LG webOS TV needs its firmware updated through the settings menu.", { subject: { name: "LG webOS TV", kind: "asset" } });
+  assert.deepEqual((await subjectRows(app)).map((r) => [r.slug, r.status]).sort(), [["lg-tv", "active"], ["lg-webos-tv", "proposed"]]);
 });
 
 // ---------------------------------------------------------------- accept and dismiss

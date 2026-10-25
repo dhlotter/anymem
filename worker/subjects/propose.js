@@ -15,6 +15,23 @@ export { PROPOSED_BRIEF, slugOf };
 export const MAX_PROPOSED = 25;
 const MAX_EVIDENCE = 50;
 
+// A hint names a subject from one memory. One mention is not a subject (a tool the person used once would be one), so the first
+// mention is only remembered and the second memory that names it makes the proposal. The memory is one small JSON value in the
+// meta table, {slug: {name, kind, ids, day}}, kept 14 days and at most 200 names. It is read and written without a lock, so two
+// hints at once can lose one entry. That costs one more mention, never a wrong proposal.
+const CANDIDATES_KEY = "hint_candidates";
+const CANDIDATE_DAYS = 14;
+const CANDIDATE_MAX = 200;
+const DEFAULT_MENTIONS = 2;
+const MAX_MENTIONS = 5;
+
+/** How many separate memories must name a subject before it is proposed. SUBJECTS_HINT_MENTIONS, 1 to 5, default 2. 1 proposes on the first mention. */
+export function hintMentions(env) {
+  const n = Number(env.SUBJECTS_HINT_MENTIONS);
+  return Number.isInteger(n) && n >= 1 && n <= MAX_MENTIONS ? n : DEFAULT_MENTIONS;
+}
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 /** What the audit row says for each step that proposes. */
 const STEPS = { propose: { route: "propose.subject", how: "hint" }, cluster: { route: "cluster.propose", how: "cluster" } };
 
@@ -143,6 +160,44 @@ export async function createProposed(env, { name, kind, evidence, now, madeBy = 
   }
 }
 
+const wordsOf = (slug) => new Set(String(slug).split("-").filter(Boolean));
+const isSubset = (small, big) => small.size > 0 && [...small].every((w) => big.has(w));
+
+/** The proposed subject a name is the same thing as, by whole dash separated words of the slug (lg-tv and lg-webos-tv), or null. */
+async function matchingProposal(db, slug) {
+  const mine = wordsOf(slug);
+  const { results } = await db.prepare("SELECT id, slug FROM subjects WHERE status = 'proposed'").all();
+  return (results ?? []).find((r) => { const theirs = wordsOf(r.slug); return isSubset(mine, theirs) || isSubset(theirs, mine); }) ?? null;
+}
+
+/** Link one more memory to a proposal that waits for a click, under the same guards as the evidence of a new proposal. Returns whether a link was made. */
+async function addEvidence(db, cardId, memoryId, now) {
+  const res = await db
+    .prepare(
+      "INSERT OR IGNORE INTO links (source_id, target_id, link_type, created_at, made_by, confidence) SELECT ?, ?, 'about', ?, 'system', 1 WHERE EXISTS (SELECT 1 FROM memories WHERE id = ? AND deleted_at IS NULL) AND NOT EXISTS (SELECT 1 FROM subjects WHERE id = ?) AND NOT EXISTS (SELECT 1 FROM links l JOIN subjects s ON s.id = l.target_id WHERE l.source_id = ? AND l.link_type = 'about' AND s.scope = 'private') AND EXISTS (SELECT 1 FROM subjects WHERE id = ? AND status = 'proposed')",
+    )
+    .bind(memoryId, cardId, now, memoryId, memoryId, memoryId, cardId)
+    .run();
+  return res.meta.changes > 0;
+}
+
+async function readCandidates(db, today) {
+  const row = await db.prepare("SELECT value FROM meta WHERE key = ?").bind(CANDIDATES_KEY).first();
+  let value = {};
+  try {
+    const parsed = JSON.parse(row?.value ?? "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) value = parsed;
+  } catch {
+    // an unreadable value is no memory of earlier mentions
+  }
+  return Object.fromEntries(Object.entries(value).filter(([, c]) => c && Array.isArray(c.ids) && today - (c.day ?? 0) <= CANDIDATE_DAYS));
+}
+
+async function writeCandidates(db, candidates) {
+  const keep = Object.entries(candidates).sort((a, b) => (b[1].day ?? 0) - (a[1].day ?? 0)).slice(0, CANDIDATE_MAX);
+  await db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(CANDIDATES_KEY, JSON.stringify(Object.fromEntries(keep))).run();
+}
+
 /**
  * Propose a subject from the extractor's hint about one memory. The hint must be well formed, the memory must be a live capture or
  * explicit write, and the name must stand in the memory's own text, so a hint cannot invent a subject the memory is not about.
@@ -170,6 +225,33 @@ export async function proposeFromHint(env, { memoryId, hint, now }) {
   } catch {
     return { ok: false, reason: "failed" };
   }
-  const made = await createProposed(env, { name: clean.name, kind: clean.kind, evidence: [{ id: memoryId, confidence: 1 }], now });
-  return made.ok ? { ok: true } : { ok: false, reason: made.reason };
+  const clock = asClock(now);
+  try {
+    const slug = slugOf(clean.name);
+    if (!slug) return { ok: false, reason: "bad_name" };
+    // The same thing as a proposal that already waits: this memory is more evidence for it, not a second proposal.
+    const same = await matchingProposal(env.DB, slug);
+    if (same) {
+      if (!(await addEvidence(env.DB, same.id, memoryId, clock()))) return { ok: false, reason: "no_evidence" };
+      await audit(env.DB, { step: "propose", conf: 1, now: clock, status: 200, ids: [same.id, memoryId] });
+      return { ok: true, merged: same.slug };
+    }
+    // Memories that name a subject are remembered until enough of them have, then the proposal is made with all of them as evidence.
+    const today = Math.floor(clock() / DAY_MS);
+    const candidates = await readCandidates(env.DB, today);
+    const earlier = candidates[slug]?.ids?.filter((id) => id !== memoryId) ?? [];
+    if (earlier.length + 1 < hintMentions(env)) {
+      candidates[slug] = { name: clean.name, kind: clean.kind, ids: [...earlier, memoryId].slice(-MAX_MENTIONS), day: today };
+      await writeCandidates(env.DB, candidates);
+      return { ok: false, reason: "waiting" };
+    }
+    const made = await createProposed(env, { name: clean.name, kind: clean.kind, evidence: [...earlier, memoryId].map((id) => ({ id, confidence: 1 })), now });
+    if (made.ok) {
+      delete candidates[slug];
+      await writeCandidates(env.DB, candidates).catch(() => {});
+    }
+    return made.ok ? { ok: true } : { ok: false, reason: made.reason };
+  } catch {
+    return { ok: false, reason: "failed" };
+  }
 }

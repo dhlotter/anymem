@@ -2,7 +2,7 @@
 
 The Cloudflare Worker behind anymem. Plain JavaScript ES modules. No dependencies, no bundler, no build step. The code that runs is the code you read. Types are written as JSDoc comments.
 
-Version 2.1.2 (`version.js` and `package.json` agree). It holds auth, the audit trail, device tokens, health and stats, storage and history of memories, search, the write pipeline, extract, the capsule, the dashboard, the nightly job, backups and import. [ARCHITECTURE.md](ARCHITECTURE.md) says how each part works. The people who use anymem never run anything in this folder. `setup.py` uploads these files, see [docs/install.md](../docs/install.md).
+Version 2.1.3 (`version.js` and `package.json` agree). It holds auth, the audit trail, device tokens, health and stats, storage and history of memories, search, the write pipeline, extract, the capsule, the dashboard, the nightly job, backups and import. [ARCHITECTURE.md](ARCHITECTURE.md) says how each part works. The people who use anymem never run anything in this folder. `setup.py` uploads these files, see [docs/install.md](../docs/install.md).
 
 ## Test
 
@@ -58,6 +58,7 @@ For development, a Wrangler deploy works too.
 | `RERANK` | var | `0` turns the reranker off |
 | `SUBJECTS` | var | `on` makes a recall also return the subject cards its relevant results are about. `off` or unset leaves the reply as it was, with no `subjects` key. `GET /recall?subject=` and the subject routes work whatever it says |
 | `SUBJECTS_AUTO` | var | `on` lets the Worker act on subjects by itself. After a write it links the memory to the subjects it is about, it proposes a subject from an extractor hint, and the nightly `cluster` step runs. It does nothing unless `SUBJECTS` is `on` as well. `off` or unset, the default, means the Worker never links, proposes or groups on its own. The admin preview routes and the accept and dismiss clicks work whatever it says |
+| `SUBJECTS_HINT_MENTIONS` | var | How many separate memories must name a subject before a proposal is made from an extractor hint, 1 to 5. The default is 2, so one mention of a tool is only remembered and the second memory that names it makes the proposal. `1` proposes on the first mention. Anything else means 2 |
 | `SUBJECTS_BRIEFS` | var | `on` lets the nightly `briefs` step write briefs. It does nothing unless `SUBJECTS` and `SUBJECTS_AUTO` are `on` as well. `off` or unset, the default, means no brief is built. Taking a brief away when its text must go (a member was forgotten, replaced or linked to a private subject) does not depend on it |
 | `NIGHTLY_SUBREQUESTS` | var | Subrequests the whole nightly run may use. A whole number from 10 to 5000, default 40 (the Free plan). `setup.py` sets 400 when the plan is Paid |
 | `NIGHTLY_WALL_MS` | var | Milliseconds each nightly step may take. A whole number from 1000 to 600000, default 20000. `setup.py` sets 120000 when the plan is Paid |

@@ -13,7 +13,7 @@ import { assignMemory } from "../subjects/assign.js";
 import { createProposed } from "../subjects/propose.js";
 import { recallSubject } from "../search/recall.js";
 
-const ON = { SUBJECTS: "on", SUBJECTS_AUTO: "on" };
+const ON = { SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_HINT_MENTIONS: "1" };
 const now = () => 1_790_000_000_000;
 const status = async (app, id, d) => (await app.call(`/entry?id=${id}`, { token: d.token })).status;
 const links = async (app, id, d) => (await app.call(`/links?id=${id}`, d ? { token: d.token } : {})).json.links;
