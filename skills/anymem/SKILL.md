@@ -1,6 +1,6 @@
 ---
 name: anymem
-description: Shared memory for coding agents, on the user's own Cloudflare account. Use when the user asks to remember, recall, forget or correct something, asks what you know about them, a project or a past decision ("do you remember", "what did we decide", "what do you know about"), says "remember this", "forget that" or "that is wrong", or when a fact should outlive this session: a correction, a confirmed decision, a preference with its reason, or where an outside resource lives. Also covers doctor checks and local backups.
+description: Shared memory for coding agents, on the user's own Cloudflare account. Use when the user asks to remember, recall, forget or correct something, asks what you know about them, a project or a past decision ("do you remember", "what did we decide", "what do you know about"), says "remember this", "forget that" or "that is wrong", or when a fact should outlive this session (a correction, a confirmed decision, a preference with its reason, or where an outside resource lives). Also covers doctor checks and local backups.
 user-invocable: true
 ---
 
