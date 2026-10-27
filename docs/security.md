@@ -133,7 +133,7 @@ These live in `~/.cache/anymem`. `ANYMEM_CACHE_DIR` moves the folder. The folder
 | `recall-seen.json`, `ids.json` | Memory ids already shown in a session, and ids that scripts printed so a short prefix works | The newest 40 sessions, and the newest 500 ids |
 | `harness-hint.json`, `check-last`, `recall-check.json` | Small stamps and hints | One value each |
 | `failed.jsonl` | A save or capture that could not reach the Worker, with its text, retried later. This is memory text. | Emptied as each line is sent |
-| `credentials/` | The printed result of `credential_command`, in plain text, for 900 seconds by default. `ANYMEM_CRED_TTL=0` turns it off. | Deleted when the Worker answers 401 or 403 |
+| `credentials/` | The printed result of `credential_command`, in plain text, for 900 seconds by default (3600 for the Cline plugin's children, which also warm it when a session starts). `ANYMEM_CRED_TTL=0` turns it off. | Deleted when the Worker answers 401 or 403 |
 | `*.lock` | Empty lock files | None needed |
 
 Four harnesses keep a copy of the conversation because they give a hook nothing to read.

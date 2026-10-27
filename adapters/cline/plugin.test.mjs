@@ -83,7 +83,7 @@ test("beforeRun starts no child process: the user's message is not in the snapsh
   const r = rig({ prompt: { ctx: "RECALL" }, "session-start": { ctx: "CAPSULE" } });
   const p = await load(r.testing);
   assert.equal(await beforeRun(p, []), undefined);
-  assert.equal(r.calls.length, 0);
+  assert.deepEqual(r.calls.filter((c) => c.event !== "warm"), [], "only the credential warm-up may start, never a recall or a capsule call");
 });
 
 test("the first model call of a conversation runs the capsule and the recall in parallel and puts both in the request", async () => {
@@ -95,7 +95,7 @@ test("the first model call of a conversation runs the capsule and the recall in 
   await beforeRun(p, []);
   const pending = model(p, messages);
   await new Promise((res) => setTimeout(res, 20));
-  assert.deepEqual(r.calls.map((c) => c.event).sort(), ["prompt", "session-start"], "both were started before either answered");
+  assert.deepEqual(r.calls.map((c) => c.event).filter((e) => e !== "warm").sort(), ["prompt", "session-start"], "both were started before either answered");
   release();
   const out = await pending;
   assert.deepEqual(ctxOf(out), [
@@ -119,12 +119,47 @@ test("calls carry the interpreter, the script, the unwrapped prompt, the convers
   assert.equal(prompt.payload.sessionID, "conv/odd id");
   assert.equal(prompt.payload.directory, "/work/project");
   assert.equal(prompt.payload.spool, "/fake/cache/cline/conv_odd_id.jsonl");
-  for (const c of r.calls) {
+  for (const c of r.calls.filter((x) => x.event !== "warm")) {
     assert.ok(c.timeoutMs < 3000, "the child is killed before Cline's 3000 ms hook limit");
     assert.equal(c.env.ANYMEM_PLUGIN_ROOT, "/fake/root");
     assert.equal(c.env.ANYMEM_HOOK_DEADLINE, "2", "hook.py answers inside the kill time");
     assert.equal(c.env.ANYMEM_HOOK_TIMEOUT, "2");
+    assert.equal(c.env.ANYMEM_CRED_TTL, "3600", "the credential cache lives an hour, so one warm-up covers the session");
   }
+});
+
+// ---- the credential warm-up: the first anymem call of a session is cold (about 2 s) and Cline gives a hook 3 s
+
+test("setup starts one detached warm-up, and a beforeRun soon after does not start another", async () => {
+  const r = rig({});
+  const p = await load(r.testing);
+  p.setup({}, { cwd: "/work/project", session: { sessionId: "s" } });
+  await beforeRun(p, []);
+  const warms = r.calls.filter((c) => c.event === "warm");
+  assert.equal(warms.length, 1);
+  assert.deepEqual(warms[0].argv, ["/fake/python3", "/fake/root/adapters/cline/hook.py", "warm"]);
+  assert.equal(warms[0].fire, true, "detached, never waited for");
+  assert.equal(warms[0].env.ANYMEM_CRED_TTL, "3600");
+});
+
+test("the warm-up runs again once 45 minutes have passed, and not before", async () => {
+  const r = rig({});
+  let now = 1_800_000_000_000;
+  const p = await load({ ...r.testing, now: () => now });
+  p.setup({}, {});
+  now += 44 * 60 * 1000;
+  await beforeRun(p, [], { conversationId: "c-a" });
+  assert.equal(r.calls.filter((c) => c.event === "warm").length, 1, "44 minutes is too soon");
+  now += 2 * 60 * 1000;
+  await beforeRun(p, [], { conversationId: "c-b" });
+  assert.equal(r.calls.filter((c) => c.event === "warm").length, 2, "46 minutes after the first warm-up");
+});
+
+test("a failing warm-up never breaks setup or a run", async () => {
+  const r = rig({ warm: new Error("spawn failed") });
+  const p = await load(r.testing);
+  assert.doesNotThrow(() => p.setup({}, { cwd: "/work" }));
+  assert.equal(await beforeRun(p, []), undefined);
 });
 
 test("the second run asks only for recall, and keeps the capsule and the first recall block where they were", async () => {

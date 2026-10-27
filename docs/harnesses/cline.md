@@ -43,16 +43,17 @@ Cline stops a plugin hook after 3 seconds, and counts a timeout as a failure. A 
 
 1. The child process is killed at 2.6 seconds. The whole hook gives up at 2.75 seconds, whatever the child does.
 2. The plugin sets `ANYMEM_HOOK_DEADLINE=2` for `hook.py`, which is the shared deadline of the recall hook, and `ANYMEM_HOOK_TIMEOUT=2` for the capsule's network call. The deadline starts when Python is up, about 0.1 to 0.25 seconds after the spawn (measured, Python 3.14 and 3.9), so the reply lands at about 2.1 to 2.3 seconds, before the kill.
-3. A recall call takes a client median of 1.3 seconds and a 95th percentile of 1.6 seconds in the [benchmark](../benchmark.md), so a 2 second deadline fits most recalls. A slow one is dropped, the message goes through with no memory, and nothing is shown as an error. A reply that comes late is thrown away, never added in the middle of a run.
+3. A slow one is dropped, the message goes through with no memory, and nothing is shown as an error. A reply that comes late is thrown away, never added in the middle of a run.
 4. If the capsule did not arrive, the next run asks for it again, twice at most.
+5. **The credential warm-up.** The first anymem call after a quiet spell is slow because the secret manager behind `credential_command` is cold. Measured on 2026-10-27 on this Mac, the capsule call took 2.3 seconds cold and 0.4 seconds warm, and a recall call took up to 3.1 seconds cold and about 1.6 seconds warm. A cold first prompt would miss Cline's limit almost every time. So the plugin starts `hook.py warm` in a detached child when a Cline session starts, and again before a run once 45 minutes have passed. `warm` only loads the settings, which runs the credential command and caches its answer. Every child the plugin starts uses `ANYMEM_CRED_TTL=3600`, so the cache lives an hour and not 15 minutes. The cache file is the same plain text file with mode 0600 that is described in [security](../security.md).
 
-The shared recall hook also looks up your profile and people before the search, inside the same deadline. A cold lookup there can use time the search needed. We left the shared hook as it is.
+The shared recall hook also looks up your profile and people before the search, inside the same deadline. We left the shared hook as it is. Even warm, a recall can take close to the 2 second deadline, so some prompts get no recall block. The capsule still tells the model to run `anymem recall` itself, and in a live test the model did that.
 
 ## Limits
 
 1. **Cline 3.0.74 is the only version we read.** The plugin relies on the shape of the hook arguments in that build (`snapshot.messages`, `request.messages`, `metadata.displayRole`, the `<user_input>` wrapper). A new release can change them. Run `install.py --check cline` after an upgrade.
 2. **No session start event.** The capsule rides on the first model call of a conversation, so that call waits for it, up to 2.6 seconds.
-3. **Recall adds time before the first model call of a run.** About 1.3 seconds at the median, up to the 2 second deadline.
+3. **Recall adds time before the first model call of a run.** About 1.6 seconds when the credentials are warm, up to the 2 second deadline.
 4. **Capture follows the end of a run.** Cline has no session end event, so the end of a run is reported as SessionEnd and the shared rule applies. A capture only runs once at least 8 KB of new conversation text has built up since the last one. A short session captures nothing, on purpose.
 5. **A recalled block lives in the plugin's memory.** It is added again to every request while the message it was recalled for is still in the conversation. If Cline compacts that message away, or the Cline process restarts, the block is gone and is not recalled again, because the recall hook does not repeat a memory it already showed in a session.
 6. **Resumed conversations.** The capsule is fetched again in a new process, and the spool starts at the first new run, not at the old history.
@@ -78,11 +79,11 @@ That runs `cline plugin uninstall` on our copy by its path, then deletes the gen
 
 ## What was measured, and what was not
 
-Checked on 2026-10-27 on macOS with Cline CLI 3.0.74 and Python 3.9.6 and 3.14, Node 26. Not run in a live Cline session.
+Checked on 2026-10-27 on macOS with Cline CLI 3.0.74 and Python 3.9.6 and 3.14, Node 26.
 
 1. **Read in the shipped code.** The order of `callBeforeRunHooks` and the message push, the arguments of the `beforeRun`, `beforeModel` and `afterRun` hooks, what `beforeModel` may return (`messages`, `tools`, `options`), the `<user_input>` wrapper, the 3 second hook timeout and the failure count, the plugin manifest rule (hooks need the `hooks` capability).
 2. **Run for real, against a throwaway home.** `cline plugin install FOLDER --force --json` and `cline plugin uninstall PATH` with `HOME` set to a temporary folder. The install folder, the answer fields (`installPath`, `entryPaths`) and the uninstall by path behave as the adapter assumes, and `cline config --json` listed the plugin. The real `~/.cline` was not touched.
-3. **Offline tests.** `adapters/cline/test_adapter.py` (a stub `cline` command, a fake home, the fake Worker, 120 checks) and `adapters/cline/plugin.test.mjs` (26 tests of the plugin with a fake child process boundary). They include a Worker that never answers, which `hook.py` answers inside 2.6 seconds.
+3. **Offline tests.** `adapters/cline/test_adapter.py` (a stub `cline` command, a fake home, the fake Worker) and `adapters/cline/plugin.test.mjs` (29 tests of the plugin with a fake child process boundary). They include a Worker that never answers, which `hook.py` answers inside 2.6 seconds.
 4. **Not verified.** A live Cline session (that the plugin loads, that the `hook_context` message reaches the model, that returning `messages` from `beforeModel` is honoured in that build, that the model uses the memory). The hook arguments in `fixtures/run.json` were written from the code, not recorded. The Cline desktop app. Whether the plugin loads in the VS Code extension. Recall latency against a Worker through Cline's own process, and the cost of Cline sending the whole snapshot to the plugin on every hook. Cline versions other than 3.0.74.
 
 Offline tests, no Cline needed:

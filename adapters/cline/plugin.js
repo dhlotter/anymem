@@ -27,6 +27,12 @@ const HOOK_BUDGET_MS = 2750;
 const HOOK_DEADLINE = "2";
 const HOOK_NET_TIMEOUT = "2";
 const MAX_SPOOL_TEXT = 20000;
+// The first anymem call of a session is slow (about 2 s) because the credential lookup is cold, and Cline gives a hook 3 s.
+// So the plugin warms the credential cache in a detached child when a session starts, and again after 45 minutes, and every
+// child runs with a one hour cache life instead of 15 minutes.
+const CRED_TTL = "3600";
+const WARM_EVERY_MS = 45 * 60 * 1000;
+let lastWarm = 0;
 const MAX_BLOCKS = 12;
 const MAX_CONVERSATIONS = 50;
 const CAPSULE_ATTEMPTS = 2;
@@ -94,6 +100,7 @@ function deps() {
     run: (on && t.run) || defaultRun,
     append: (on && t.append) || defaultAppend,
     wait: (on && typeof t.budgetMs === "number") ? t.budgetMs : HOOK_BUDGET_MS,
+    now: (on && typeof t.now === "function") ? t.now : Date.now,
   };
 }
 
@@ -101,6 +108,18 @@ function config() {
   const root = process.env.ANYMEM_PLUGIN_ROOT || BAKED.root;
   const python = process.env.ANYMEM_PYTHON || BAKED.python || "python3";
   return { root, python, script: path.join(root || "", "adapters", "cline", "hook.py") };
+}
+
+// Fire and forget: primes the credential cache so the next recall is fast. Never waits, never throws.
+function warm() {
+  try {
+    const { root, python, script } = config();
+    if (!root) return;
+    const now = deps().now();
+    if (now - lastWarm < WARM_EVERY_MS) return;
+    lastWarm = now;
+    Promise.resolve(deps().run([python, script, "warm"], "{}", 8000, { ANYMEM_PLUGIN_ROOT: root, ANYMEM_CRED_TTL: CRED_TTL }, true)).catch(() => {});
+  } catch {}
 }
 
 function directory() {
@@ -215,6 +234,7 @@ const plugin = {
       if (ctx && typeof ctx.cwd === "string") setupInfo.cwd = ctx.cwd;
       if (ctx && ctx.session && typeof ctx.session.sessionId === "string") setupInfo.sessionId = ctx.session.sessionId;
     } catch {}
+    warm();
   },
 
   hooks: {
@@ -227,6 +247,7 @@ const plugin = {
         const st = convo(keyOf(snapshot));
         if (st.spooled === null) st.spooled = Array.isArray(snapshot.messages) ? snapshot.messages.length : 0;
         st.epoch += 1;
+        warm();
       } catch {}
       return undefined;
     },
@@ -285,7 +306,7 @@ async function callHook(event, payload, timeoutMs, fire) {
   try {
     const { root, python, script } = config();
     if (!root) return none;
-    const env = { ANYMEM_PLUGIN_ROOT: root, ANYMEM_HOOK_DEADLINE: HOOK_DEADLINE, ANYMEM_HOOK_TIMEOUT: HOOK_NET_TIMEOUT };
+    const env = { ANYMEM_PLUGIN_ROOT: root, ANYMEM_HOOK_DEADLINE: HOOK_DEADLINE, ANYMEM_HOOK_TIMEOUT: HOOK_NET_TIMEOUT, ANYMEM_CRED_TTL: CRED_TTL };
     const res = await deps().run([python, script, event], JSON.stringify(payload), timeoutMs, env, fire);
     if (fire || !res || res.code !== 0) return none;
     const line = String(res.stdout || "").trim().split("\n").pop();

@@ -73,10 +73,22 @@ def handle(event: str, raw) -> str:
     return ""
 
 
+def warm() -> None:
+    """Prime the credential cache. Loading the settings runs the credential command once and keeps its answer for ANYMEM_CRED_TTL
+    seconds, so the first recall of a session does not pay for it inside Cline's 3 second hook limit. Prints nothing."""
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _path  # noqa: F401  (puts client/ on sys.path)
+    from hm import config
+    config.load()
+
+
 def main(argv: list) -> int:
     os.environ["ANYMEM_HARNESS"] = "cline"  # the audit log and the Worker say which harness called, whatever the environment held
     try:
         event = argv[1] if len(argv) > 1 else ""
+        if event == "warm":  # no payload, no reply, no capture
+            warm()
+            return 0
         try:
             raw = json.loads(sys.stdin.read() or "{}")
         except (ValueError, OSError):

@@ -533,6 +533,17 @@ check("hook: the recorded prompt fixture is handled without noise", p.returncode
 # keep: the policy answer the plugin uses to decide whether it may spool the conversation text
 p, _ = run_hook(["prompt"], sample("prompt"), {**good_env, "ANYMEM_CAPTURE": "0"})
 check("hook: capture switched off, the prompt reply says keep false", p.returncode == 0 and json.loads(p.stdout.decode())["keep"] is False and p.stderr == b"", p.stdout.decode()[:200])
+# warm runs the credential command once and leaves its answer in the cache, which is the whole point of it: the first recall of a
+# session then does not pay for a slow secret manager inside Cline's 3 second hook limit.
+warm_marker = fresh("warm-marker") / "ran.txt"
+warm_cfg_dir = fresh("warm-cfg")
+(warm_cfg_dir / "config.json").write_text(json.dumps({"credential_command": f"echo ran >> {warm_marker}; echo '{{\"url\": \"http://127.0.0.1:9\", \"token\": \"warm-test-token\"}}'"}))
+os.chmod(warm_cfg_dir / "config.json", 0o600)
+p, warm_home = run_hook(["warm"], "", {"ANYMEM_CONFIG_DIR": str(warm_cfg_dir), "ANYMEM_CRED_TTL": "3600"})
+cached = list((warm_home / "cache" / "credentials").glob("*.json")) if (warm_home / "cache" / "credentials").exists() else []
+check("hook: warm prints nothing, runs the credential command once and caches its answer", p.returncode == 0 and p.stdout == b"" and p.stderr == b"" and warm_marker.read_text().count("ran") == 1 and len(cached) == 1, f"rc={p.returncode} out={p.stdout[:80]!r} err={p.stderr[:80]!r} marker={warm_marker.exists()} cached={cached}")
+p, _ = run_hook(["warm"], "not json at all", {"ANYMEM_CONFIG_DIR": str(warm_cfg_dir), "ANYMEM_CRED_TTL": "3600"})
+check("hook: warm ignores whatever is on stdin and starts no capture", p.returncode == 0 and p.stdout == b"" and p.stderr == b"" and not (warm_home / "cache" / "capture.log").exists())
 p, _ = run_hook(["session-start"], sample("session-start"), {**good_env, "ANYMEM_CAPTURE": "0"})
 out = json.loads(p.stdout.decode().strip())
 check("hook: capture switched off, the session-start reply says keep false and still carries the capsule", out["keep"] is False and "heron" in out["additionalContext"], p.stdout.decode()[:200])
