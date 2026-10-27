@@ -136,15 +136,16 @@ These live in `~/.cache/anymem`. `ANYMEM_CACHE_DIR` moves the folder. The folder
 | `credentials/` | The printed result of `credential_command`, in plain text, for 900 seconds by default. `ANYMEM_CRED_TTL=0` turns it off. | Deleted when the Worker answers 401 or 403 |
 | `*.lock` | Empty lock files | None needed |
 
-Three harnesses keep a copy of the conversation because they give a hook nothing to read.
+Four harnesses keep a copy of the conversation because they give a hook nothing to read.
 
 | Harness | File | What it holds |
 |---|---|---|
 | Kilo | `kilo/SESSION.jsonl` | The user and assistant text of each conversation, 20,000 characters per message at most. Written only while the capture policy allows it. Spools of sessions capture has forgotten are deleted. |
+| Cline | `cline/CONVERSATION.jsonl` | The user and assistant text of each conversation, after each run, 20,000 characters per message at most. Tool calls and results, hook text and reasoning are left out. Written only while the capture policy allows it. Spools of sessions capture has forgotten are deleted. |
 | ZCode | `zcode-sessions/SESSION.jsonl` | Each prompt and reply of the session. Written only when capture is on and the session and folder are not excluded. |
 | Antigravity | `agy-state.json` | A key and a time per conversation, no text. Old entries are dropped past a cap. |
 
-The Kilo and ZCode files are full conversation text. They are redacted before capture reads them and not before they are written, so treat that folder like the transcripts of those harnesses. Turn capture off, or exclude a folder, and nothing is written.
+The Kilo, Cline and ZCode files are full conversation text. They are redacted before capture reads them and not before they are written, so treat that folder like the transcripts of those harnesses. Turn capture off, or exclude a folder, and nothing is written.
 
 A capture run or a capsule check asks the local `claude` command one question. It runs in a folder made for that one call, mode 0700, with no settings loaded, and the folder is removed afterwards.
 
@@ -157,8 +158,10 @@ A capture run or a capsule check asks the local `claude` command one question. I
 | `~/.config/anymem` | `device-XXXXXXXX.txt`, mode 0600, one new file each time. A device token, never printed. | `devices.py add` |
 | `~/.config/anymem/backups` | `anymem-DATE.json.gz`, the whole store, mode 0600. | `backup.py` |
 | `~/.config/anymem/adapters` | A starter adapter folder. | `install.py --new` |
+| `~/.config/anymem/cline-plugin` | `anymem.js` and `package.json`, the Cline plugin with the plugin root and the Python path written into it. No credential. Uninstall removes the folder. | `install.py cline` |
+| `~/.cline/plugins/_installed/local` | Cline's own copy of that folder, made by `cline plugin install`. | `install.py cline` runs the command |
 
-An install step edits the harness's own files. Claude Code and Codex install the plugin themselves, and Codex edits its `config.toml` after copying it to `config.toml.anymem.bak`. Kilo gets one file, `~/.config/kilo/plugin/anymem.js`. ZCode gets a plugin folder under `~/.zcode/anymem/plugin` that it registers. Antigravity gets one `anymem` entry in `hooks.json`, with a `.anymem.bak` copy first. DSH gets `dsh-hooks.json` and one marked block in each profile's patch file. Each adapter's uninstall removes exactly what it added.
+An install step edits the harness's own files. Claude Code and Codex install the plugin themselves, and Codex edits its `config.toml` after copying it to `config.toml.anymem.bak`. Kilo gets one file, `~/.config/kilo/plugin/anymem.js`. Cline gets a generated folder, `~/.config/anymem/cline-plugin`, with `anymem.js` and `package.json` in it, and Cline's own `plugin install` copies that to `~/.cline/plugins/_installed/local/cline-plugin-HASH` (the command may also create its own `~/.npm` and cache folders on a first run). ZCode gets a plugin folder under `~/.zcode/anymem/plugin` that it registers. Antigravity gets one `anymem` entry in `hooks.json`, with a `.anymem.bak` copy first. DSH gets `dsh-hooks.json` and one marked block in each profile's patch file. Each adapter's uninstall removes exactly what it added.
 
 You can delete the cache folder at any time. The only thing in it that is not a copy of something else is `failed.jsonl`, a save that has not reached the Worker yet. Delete `config.json` and the machine is disconnected.
 

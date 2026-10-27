@@ -16,7 +16,7 @@ test("every harness has an id, a label and a lower case alias list, and no name 
     assert.ok(h.label.length > 0);
     for (const a of h.aliases) assert.equal(a, a.toLowerCase());
   }
-  assert.deepEqual(HARNESSES.map((h) => h.label), ["Claude Code", "Codex", "Antigravity", "DSH", "Kilo", "ZCode"]);
+  assert.deepEqual(HARNESSES.map((h) => h.label), ["Claude Code", "Codex", "Antigravity", "DSH", "Kilo", "ZCode", "Cline"]);
   assert.equal(DASHBOARD.label, "Dashboard");
 });
 

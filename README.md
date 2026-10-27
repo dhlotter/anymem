@@ -2,7 +2,7 @@
 
 Shared memory for coding agents, on your own Cloudflare account.
 
-You tell an agent something once. Anymem keeps it in a Worker, a D1 database and a Vectorize index that you own, and every agent on every machine can read it. It works with six harnesses, Claude Code, Codex, Antigravity (agy), DSH, Kilo and ZCode.
+You tell an agent something once. Anymem keeps it in a Worker, a D1 database and a Vectorize index that you own, and every agent on every machine can read it. It works with seven harnesses, Claude Code, Codex, Antigravity (agy), DSH, Kilo, ZCode and Cline.
 
 This is an early release, tested on one Cloudflare account and supported on a best effort basis by one maintainer.
 
@@ -68,6 +68,7 @@ Hook events were probed live on 2026-10-08 by running each harness with a loggin
 | ZCode 0.16.9 | SessionStart, UserPromptSubmit, Stop | yes | `additionalContext`, seen in the model request | [zcode](docs/harnesses/zcode.md) |
 | DSH 0.2.0 rc2 | SessionStart, UserPromptSubmit, Stop, through a Claude style bridge | yes | `additionalContext`, the model repeated the marker | [dsh](docs/harnesses/dsh.md) |
 | Kilo 7.7.5 | chat.message, session.idle, session compacting, system prompt transform, in a JavaScript plugin | yes | system prompt, proven | [kilo](docs/harnesses/kilo.md) |
+| Cline 3.0.74 | beforeRun, beforeModel, afterRun, in a JavaScript plugin | read from the model request | a `hook_context` message in the request, not yet proven in a live run | [cline](docs/harnesses/cline.md) |
 
 A harness we do not ship takes one adapter. See [add a harness](docs/add-a-harness.md).
 

@@ -1,6 +1,6 @@
 {
   "name": "anymem-worker",
-  "version": "2.1.3",
+  "version": "2.2.0",
   "private": true,
   "type": "module",
   "description": "The anymem v2 Worker. Plain JavaScript, no dependencies.",

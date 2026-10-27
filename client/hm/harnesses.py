@@ -21,7 +21,7 @@ import os
 import re
 import time
 
-IDS = ("claude", "codex", "agy", "dsh", "kilo", "zcode")
+IDS = ("claude", "codex", "agy", "dsh", "kilo", "zcode", "cline")
 ALIASES = {"claude-code": "claude", "antigravity": "agy"}
 HINT_TTL = 4 * 3600  # seconds a note stays valid
 HINT_REFRESH = 300   # a hook rewrites an unchanged note at most this often

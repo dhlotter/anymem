@@ -47,7 +47,7 @@ worker_aliases = {a: r[0] for r in rows for a in re.findall(r'"([^"]+)"', r[2])}
 check("the Worker's list was read", len(rows) >= 6, str(rows))
 check("the client and the Worker list the same ids, in the same order", worker_ids == harnesses.IDS, f"{worker_ids} {harnesses.IDS}")
 check("the client and the Worker know the same aliases", worker_aliases == harnesses.ALIASES, f"{worker_aliases} {harnesses.ALIASES}")
-check("the five adapters and Claude Code are all in the list", set(harnesses.IDS) >= {"claude", "codex", "agy", "dsh", "kilo", "zcode"})
+check("the six adapters and Claude Code are all in the list", set(harnesses.IDS) >= {"claude", "codex", "agy", "dsh", "kilo", "zcode", "cline"})
 
 # 2. Names.
 check("a known name resolves to its id whatever its case", harnesses.resolve("Codex") == "codex" and harnesses.resolve(" ZCODE ") == "zcode")
@@ -99,6 +99,7 @@ HOOKS = {
     "dsh": ("adapters/dsh/hook.py", ["prompt"], "adapters/dsh/fixtures/payload-prompt.json"),
     "kilo": ("adapters/kilo/hook.py", ["prompt"], "adapters/kilo/fixtures/prompt.json"),
     "zcode": ("adapters/zcode/hook.py", ["prompt"], "adapters/zcode/fixtures/payload-prompt.json"),
+    "cline": ("adapters/cline/hook.py", ["prompt"], "adapters/cline/fixtures/prompt.json"),
 }
 SKIP = ("ANYMEM_", "CLAUDE_PLUGIN_OPTION_")
 

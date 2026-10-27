@@ -1,0 +1,313 @@
+{
+ "note": "Invented text. The shapes follow what the Cline SDK code builds (snapshot(), the user_input wrapper, hook_context, [SYSTEM] reminders). They were read from the shipped code, not recorded from a live run.",
+ "beforeRun": {
+  "snapshot": {
+   "agentId": "agent_01example",
+   "agentRole": null,
+   "parentAgentId": null,
+   "conversationId": "conv_01hqexampleferry",
+   "runId": "run_01example",
+   "status": "running",
+   "iteration": 0,
+   "pendingToolCalls": [],
+   "usage": {
+    "inputTokens": 0,
+    "outputTokens": 0
+   },
+   "messages": [
+    {
+     "id": "msg_p01",
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<user_input mode=\"act\">What is the harbour called?</user_input>"
+      }
+     ],
+     "createdAt": 1790000000001,
+     "metadata": {}
+    },
+    {
+     "id": "msg_p02",
+     "role": "assistant",
+     "content": [
+      {
+       "type": "reasoning",
+       "text": "thinking about harbours"
+      },
+      {
+       "type": "text",
+       "text": "It is called Ottermouth."
+      }
+     ],
+     "createdAt": 1790000000002
+    }
+   ]
+  }
+ },
+ "beforeModel": {
+  "snapshot": {
+   "agentId": "agent_01example",
+   "agentRole": null,
+   "parentAgentId": null,
+   "conversationId": "conv_01hqexampleferry",
+   "runId": "run_01example",
+   "status": "running",
+   "iteration": 1,
+   "pendingToolCalls": [],
+   "usage": {
+    "inputTokens": 0,
+    "outputTokens": 0
+   },
+   "messages": [
+    {
+     "id": "msg_p01",
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<user_input mode=\"act\">What is the harbour called?</user_input>"
+      }
+     ],
+     "createdAt": 1790000000001,
+     "metadata": {}
+    },
+    {
+     "id": "msg_p02",
+     "role": "assistant",
+     "content": [
+      {
+       "type": "reasoning",
+       "text": "thinking about harbours"
+      },
+      {
+       "type": "text",
+       "text": "It is called Ottermouth."
+      }
+     ],
+     "createdAt": 1790000000002
+    },
+    {
+     "id": "msg_n01",
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<user_input mode=\"act\">Which codename did we pick for the ferry route?</user_input>"
+      }
+     ],
+     "createdAt": 1790000000001
+    },
+    {
+     "id": "msg_n02",
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "[SYSTEM] This run is not complete until you call one of these terminal completion tools: submit."
+      }
+     ],
+     "createdAt": 1790000000002,
+     "metadata": {
+      "userRunSpan": 0
+     }
+    }
+   ]
+  },
+  "request": {
+   "systemPrompt": "base",
+   "messages": [
+    {
+     "id": "msg_p01",
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<user_input mode=\"act\">What is the harbour called?</user_input>"
+      }
+     ],
+     "createdAt": 1790000000001,
+     "metadata": {}
+    },
+    {
+     "id": "msg_p02",
+     "role": "assistant",
+     "content": [
+      {
+       "type": "reasoning",
+       "text": "thinking about harbours"
+      },
+      {
+       "type": "text",
+       "text": "It is called Ottermouth."
+      }
+     ],
+     "createdAt": 1790000000002
+    },
+    {
+     "id": "msg_n01",
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<user_input mode=\"act\">Which codename did we pick for the ferry route?</user_input>"
+      }
+     ],
+     "createdAt": 1790000000001
+    },
+    {
+     "id": "msg_n02",
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "[SYSTEM] This run is not complete until you call one of these terminal completion tools: submit."
+      }
+     ],
+     "createdAt": 1790000000002,
+     "metadata": {
+      "userRunSpan": 0
+     }
+    }
+   ],
+   "tools": []
+  }
+ },
+ "afterRun": {
+  "snapshot": {
+   "agentId": "agent_01example",
+   "agentRole": null,
+   "parentAgentId": null,
+   "conversationId": "conv_01hqexampleferry",
+   "runId": "run_01example",
+   "status": "completed",
+   "iteration": 2,
+   "pendingToolCalls": [],
+   "usage": {
+    "inputTokens": 0,
+    "outputTokens": 0
+   },
+   "messages": [
+    {
+     "id": "msg_p01",
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<user_input mode=\"act\">What is the harbour called?</user_input>"
+      }
+     ],
+     "createdAt": 1790000000001,
+     "metadata": {}
+    },
+    {
+     "id": "msg_p02",
+     "role": "assistant",
+     "content": [
+      {
+       "type": "reasoning",
+       "text": "thinking about harbours"
+      },
+      {
+       "type": "text",
+       "text": "It is called Ottermouth."
+      }
+     ],
+     "createdAt": 1790000000002
+    },
+    {
+     "id": "msg_n01",
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<user_input mode=\"act\">Which codename did we pick for the ferry route?</user_input>"
+      }
+     ],
+     "createdAt": 1790000000001
+    },
+    {
+     "id": "msg_n02",
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "[SYSTEM] This run is not complete until you call one of these terminal completion tools: submit."
+      }
+     ],
+     "createdAt": 1790000000002,
+     "metadata": {
+      "userRunSpan": 0
+     }
+    },
+    {
+     "id": "msg_n03",
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "<hook_context source=\"RunStart\">\nsome earlier injected text\n</hook_context>"
+      }
+     ],
+     "createdAt": 1790000000003,
+     "metadata": {
+      "userRunSpan": 0,
+      "displayRole": "system"
+     }
+    },
+    {
+     "id": "msg_n04",
+     "role": "assistant",
+     "content": [
+      {
+       "type": "reasoning",
+       "text": "let me look"
+      },
+      {
+       "type": "text",
+       "text": "I will check the notes."
+      },
+      {
+       "type": "tool-call",
+       "toolCallId": "call_1",
+       "toolName": "read_files",
+       "input": {
+        "paths": [
+         "/tmp/notes.txt"
+        ]
+       }
+      }
+     ],
+     "createdAt": 1790000000004
+    },
+    {
+     "id": "msg_n05",
+     "role": "user",
+     "content": [
+      {
+       "type": "tool-result",
+       "toolCallId": "call_1",
+       "toolName": "read_files",
+       "output": "codename: quillfern"
+      }
+     ],
+     "createdAt": 1790000000005
+    },
+    {
+     "id": "msg_n06",
+     "role": "assistant",
+     "content": [
+      {
+       "type": "text",
+       "text": "The ferry route codename is quillfern."
+      }
+     ],
+     "createdAt": 1790000000006
+    }
+   ]
+  },
+  "result": {
+   "status": "completed"
+  }
+ }
+}

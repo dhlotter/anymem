@@ -10,6 +10,7 @@ export const HARNESSES = [
   { id: "dsh", label: "DSH", aliases: [] },
   { id: "kilo", label: "Kilo", aliases: [] },
   { id: "zcode", label: "ZCode", aliases: [] },
+  { id: "cline", label: "Cline", aliases: [] },
 ];
 
 /** The dashboard calls the Worker too, but it is a caller and never the harness of a memory. */
