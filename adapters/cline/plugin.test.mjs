@@ -492,3 +492,17 @@ test("the recorded run shape (fixtures/run.json) gives one capsule, one recall, 
   const onDisk = fs.readFileSync(path.join(here, "fixtures", "spool.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
   assert.equal(onDisk.length, 2);
 });
+
+test("the spool starts at the person's message even when Cline already held it at beforeRun", async () => {
+  const r = rig({ prompt: { ctx: "R" }, "session-start": { ctx: "C" } });
+  const p = await load(r.testing);
+  const prompt = user("which codename did we pick for the ferry route", "u1");
+  // the message is already in the snapshot when beforeRun counts, as in a live Cline CLI run
+  await beforeRun(p, [prompt]);
+  await model(p, [prompt]);
+  await afterRun(p, [prompt, asst("The codename is quillfern.", "a1")]);
+  assert.deepEqual(r.spool.map((x) => [x.rec.role, x.rec.text]), [
+    ["user", "which codename did we pick for the ferry route"],
+    ["assistant", "The codename is quillfern."],
+  ]);
+});

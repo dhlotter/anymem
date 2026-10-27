@@ -143,7 +143,7 @@ function convo(key) {
   let st = conversations.get(key);
   if (!st) {
     if (conversations.size >= MAX_CONVERSATIONS) conversations.delete(conversations.keys().next().value);
-    st = { capsule: "", capsuleDone: false, capsuleTries: 0, keep: false, spooled: null, runId: undefined, lastPromptId: undefined, blocks: [], epoch: 0 };
+    st = { capsule: "", capsuleDone: false, capsuleTries: 0, keep: false, spooled: null, runId: undefined, lastPromptId: undefined, runPromptId: undefined, blocks: [], epoch: 0 };
     conversations.set(key, st);
   }
   return st;
@@ -277,7 +277,14 @@ const plugin = {
         if (isSub(snapshot) || !Array.isArray(snapshot.messages)) return undefined;
         const key = keyOf(snapshot);
         const st = convo(key);
-        const from = st.spooled === null ? snapshot.messages.length : st.spooled;
+        let from = st.spooled === null ? snapshot.messages.length : st.spooled;
+        // Cline can already hold the person's message when beforeRun runs (it did in a live run), so a start recorded by count would
+        // skip it. The prompt's own id wins when it sits earlier.
+        if (st.runPromptId) {
+          const at = snapshot.messages.findIndex((m) => m && m.id === st.runPromptId);
+          if (at >= 0 && at < from) from = at;
+          st.runPromptId = undefined;
+        }
         st.spooled = snapshot.messages.length;
         if (!st.keep) return undefined;
         let wrote = 0;
@@ -325,6 +332,7 @@ async function gather(key, st, messages) {
   const prompt = lastPrompt(messages);
   const fresh = prompt && prompt.id !== st.lastPromptId ? prompt : null;
   if (prompt) st.lastPromptId = prompt.id || prompt.text;
+  if (fresh && fresh.id) st.runPromptId = fresh.id;  // afterRun starts the spool at this message, wherever Cline put it
   const wantCapsule = !st.capsuleDone && st.capsuleTries < CAPSULE_ATTEMPTS;
   if (!wantCapsule && !fresh) return;
   const spool = spoolFile(key);
