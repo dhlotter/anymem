@@ -1,6 +1,6 @@
 # Worker architecture
 
-Version 2.1.1. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
+Version 2.1.2. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
 
 ## Module map
 

@@ -2,7 +2,7 @@
 
 The Cloudflare Worker behind anymem. Plain JavaScript ES modules. No dependencies, no bundler, no build step. The code that runs is the code you read. Types are written as JSDoc comments.
 
-Version 2.1.1 (`version.js` and `package.json` agree). It holds auth, the audit trail, device tokens, health and stats, storage and history of memories, search, the write pipeline, extract, the capsule, the dashboard, the nightly job, backups and import. [ARCHITECTURE.md](ARCHITECTURE.md) says how each part works. The people who use anymem never run anything in this folder. `setup.py` uploads these files, see [docs/install.md](../docs/install.md).
+Version 2.1.2 (`version.js` and `package.json` agree). It holds auth, the audit trail, device tokens, health and stats, storage and history of memories, search, the write pipeline, extract, the capsule, the dashboard, the nightly job, backups and import. [ARCHITECTURE.md](ARCHITECTURE.md) says how each part works. The people who use anymem never run anything in this folder. `setup.py` uploads these files, see [docs/install.md](../docs/install.md).
 
 ## Test
 
