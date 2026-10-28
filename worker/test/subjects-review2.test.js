@@ -14,7 +14,7 @@ import { DAY, indexAll, row, rows, seed, storeOf } from "./helpers/maintenance.j
 import { about, addSubject, device } from "./helpers/subjects.js";
 import { NEW_FACT, NEW_WINS, OLD_FACT, put, QUIET, scriptModel } from "./helpers/write.js";
 
-const ALL = { SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_BRIEFS: "on" };
+const ALL = { SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_HINT_MENTIONS: "1", SUBJECTS_BRIEFS: "on" };
 const SECRET = "Dana stays at the cottage when she is sick.";
 const blocks = (prompt) => [...prompt.matchAll(/<memory id="([^"]+)" date="([^"]+)">\n([\s\S]*?)\n<\/memory>/g)].map((m) => ({ id: m[1], text: m[3] }));
 
@@ -407,7 +407,7 @@ test("bringing a dismissed proposal back drops the same links, and a plain updat
 // ------------------------------------------------------------------ 7: the third switch, 9: a closed device and the brief state
 
 test("the stats say whether briefs are on", async () => {
-  for (const [env, want] of [[{ SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_BRIEFS: "on" }, true], [{ SUBJECTS: "on", SUBJECTS_AUTO: "on" }, false], [{ SUBJECTS_BRIEFS: "off" }, false]]) {
+  for (const [env, want] of [[{ SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_HINT_MENTIONS: "1", SUBJECTS_BRIEFS: "on" }, true], [{ SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_HINT_MENTIONS: "1" }, false], [{ SUBJECTS_BRIEFS: "off" }, false]]) {
     const app = await createApp({ env });
     assert.equal((await app.call("/stats")).json.subjects_briefs, want, JSON.stringify(env));
   }

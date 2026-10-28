@@ -13,7 +13,7 @@ import { DAY, dump, row, rows, restore, runNightly, seed } from "./helpers/maint
 import { about, addSubject, device } from "./helpers/subjects.js";
 import { NEW_FACT, NEW_WINS, OLD_FACT, put, QUIET, scriptModel } from "./helpers/write.js";
 
-const ALL = { SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_BRIEFS: "on" };
+const ALL = { SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_HINT_MENTIONS: "1", SUBJECTS_BRIEFS: "on" };
 const SECRET = "Dana stays at the cottage when she is sick.";
 const blocks = (prompt) => [...prompt.matchAll(/<memory id="([^"]+)" date="([^"]+)">\n([\s\S]*?)\n<\/memory>/g)].map((m) => ({ id: m[1], text: m[3] }));
 const post = (app, path, body, opts = {}) => app.call(path, { method: "POST", body, ...opts });

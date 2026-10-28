@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.3] 2026-10-28
+
+Fewer proposals to click. After a day of automatic mode, 10 of 13 waiting proposals came from a single mention each, three of them the same television under three names.
+
+1. **Two mentions.** A hint makes a proposal only when two separate memories name the subject. The first mention is remembered for 14 days. The Worker setting `SUBJECTS_HINT_MENTIONS` (1 to 5, default 2) changes that, and 1 gives the old behaviour.
+2. **One thing, one proposal.** A hint whose name is the same as a proposal that already waits, by whole words of the slug, adds its memory to that proposal as more evidence and makes no new one. A subject that is already active is not merged into.
+
 ## [2.1.2] 2026-10-28
 
 A closed device could tell that a hidden memory exists. Recall ranked the results before it dropped the memories a device may not see, so a hidden private memory took a rank and moved the scores of the visible ones. With a hidden memory present two visible results scored 0.032258 and 0.031746. Without it they scored 0.032787 and 0.032258. Recall now drops hidden ids from the dense and keyword lists before they are fused, so a device without private access gets the same order and scores it would get if the hidden memory did not exist.

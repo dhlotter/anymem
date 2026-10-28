@@ -14,7 +14,7 @@ import { createProposed } from "../subjects/propose.js";
 import { KINDS } from "../subjects/store.js";
 import { memberHash } from "../subjects/brief.js";
 
-const ON = { SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_BRIEFS: "on" };
+const ON = { SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_HINT_MENTIONS: "1", SUBJECTS_BRIEFS: "on" };
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
 
 /** A subject with its members, written straight to the store. @returns {Promise<{card: string, ids: string[]}>} */
@@ -61,7 +61,7 @@ const subjectRow = (app, id) => row(app, id).then(() => app.env.DB.prepare("SELE
 // ------------------------------------------------------------------ the flags
 
 test("with any of the three flags off the step builds nothing, and only looks for text that must go", async () => {
-  const cases = [{}, { SUBJECTS: "on" }, { SUBJECTS_AUTO: "on" }, { SUBJECTS: "off", SUBJECTS_AUTO: "on", SUBJECTS_BRIEFS: "on" }, { SUBJECTS: "on", SUBJECTS_AUTO: "off", SUBJECTS_BRIEFS: "on" }, { SUBJECTS: "on", SUBJECTS_AUTO: "on" }, { SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_BRIEFS: "off" }, { SUBJECTS: "on", SUBJECTS_BRIEFS: "on" }, { SUBJECTS_BRIEFS: "on" }];
+  const cases = [{}, { SUBJECTS: "on" }, { SUBJECTS_AUTO: "on", SUBJECTS_HINT_MENTIONS: "1" }, { SUBJECTS: "off", SUBJECTS_AUTO: "on", SUBJECTS_HINT_MENTIONS: "1", SUBJECTS_BRIEFS: "on" }, { SUBJECTS: "on", SUBJECTS_AUTO: "off", SUBJECTS_BRIEFS: "on" }, { SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_HINT_MENTIONS: "1" }, { SUBJECTS: "on", SUBJECTS_AUTO: "on", SUBJECTS_HINT_MENTIONS: "1", SUBJECTS_BRIEFS: "off" }, { SUBJECTS: "on", SUBJECTS_BRIEFS: "on" }, { SUBJECTS_BRIEFS: "on" }];
   for (const env of cases) {
     const app = await world(env);
     const { card } = await subject(app, "pip", ["Pip weighs 12 kilos."]);
