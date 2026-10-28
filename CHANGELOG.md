@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.1.2] 2026-10-28
+
+A closed device could tell that a hidden memory exists. Recall ranked the results before it dropped the memories a device may not see, so a hidden private memory took a rank and moved the scores of the visible ones. With a hidden memory present two visible results scored 0.032258 and 0.031746. Without it they scored 0.032787 and 0.032258. Recall now drops hidden ids from the dense and keyword lists before they are fused, so a device without private access gets the same order and scores it would get if the hidden memory did not exist.
+
 ## [2.1.1] 2026-10-22
 
 The clustering preview on a real store showed two faults, both fixed.

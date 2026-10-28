@@ -1,6 +1,6 @@
 # Worker architecture
 
-Version 2.1.1. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
+Version 2.1.2. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
 
 ## Module map
 
@@ -473,7 +473,7 @@ minute lag.
 9. `recall_count` and `last_recalled_at` change only with `count=1`. Only hits marked relevant are counted, and each one also gets a `recall_log` row with the time and the harness of the caller (see "Counters" below), written in its own statement so a failure there never undoes the count. A plain recall writes nothing but its audit row, which lists the
    returned ids. Query parameters are `query, topK (1 to 50, default 5), scope, exclude_ids, tag, kind, type, origin, after,
    before, min_recalls, as_of, capsule, explain, count, subject`. `synthesize` is ignored.
-10. The private rule runs on the rows the filter step loaded, before ranking, so the cut to `topK`, the order and every relevance check see only what the caller may see. A recall by a device without private access ranks the same as one by the admin token over the visible memories, and a page is still full.
+10. The private rule runs on the candidate ids from both searches, before they are fused, so a hidden memory takes no rank. The cut to `topK`, the order, the scores and every relevance check see only what the caller may see. A recall by a device without private access ranks the same as one by the admin token over the visible memories, and a page is still full.
 11. With `SUBJECTS` set to `on`, one query after ranking finds the cards of the relevant results: `about` links from those results to a subject with status `active` or `stale` whose card memory is live, and for a device without private access only a shared subject. The best ranked result's subject comes first, then the one with more `via` results, and two at most are returned. A reply with no cards has `subjects: []`. The reply never has the key when the variable is off or unset. This is the only place recall reads the `subjects` table.
 12. `GET /recall?subject=SLUG` skips search. It reads the card by slug (one query, the private rule in its SQL) and the live members newest updated first, capped by `topK` (a second query), then the text and tags of those members like a recall does. It is not ranked, not counted and takes no part in `recall_log`. Private members need no filter of their own: a member of a visible subject has an `about` link to a subject the caller sees, so the rule never hides it. A subject the caller may not see is 404, like a missing slug. A subject whose card memory is still `pending` is not served either, so a dismissed proposal is a 404 until it is brought back.
 
