@@ -6,7 +6,7 @@ import { embedTexts } from "./embed.js";
 import { keywordSearch } from "./fts.js";
 import { cleanQuery } from "./query.js";
 import { minRerank, minSimilarity, RARE_IDF, ruleChecks } from "./relevance.js";
-import { mayBeRestricted, SEES_PRIVATE_SQL, visibleOnly } from "../subjects/private.js";
+import { hiddenIds, mayBeRestricted, SEES_PRIVATE_SQL, visibleOnly } from "../subjects/private.js";
 
 export const RRF_K = 60;
 export const RARE_BOOST = 2; // a keyword hit that holds a rare word counts double, so an exact identifier beats a vague neighbour
@@ -165,11 +165,12 @@ export async function recall(env, params, now) {
     keywordSearch(env.DB, query, { limit: CANDIDATES }).then((k) => ((timings.keyword = now() - t0), k)),
   ]);
   const tSearched = now();
-  const merged = fuse(dense, keyword);
+  // Hidden memories go before fusion, so they take no rank. top_k is still filled and the scores of the others do not change.
+  const hidden = await hiddenIds(env.DB, [...dense, ...keyword].map((h) => h.id), params.actor);
+  const merged = hidden.size ? fuse(dense.filter((d) => !hidden.has(d.id)), keyword.filter((k) => !hidden.has(k.id))) : fuse(dense, keyword);
   if (!merged.size) return { query, results: [], ...none, ...(degraded ? { degraded } : {}) };
 
-  // Hidden memories go before ranking, so top_k is still filled and the relevance of the others does not change.
-  const rows = await visibleOnly(env.DB, await load(env.DB, [...merged.keys()], filters), params.actor);
+  const rows = await load(env.DB, [...merged.keys()], filters);
   timings.load = now() - tSearched;
   const at = now();
   const cutoff = minSimilarity(env);

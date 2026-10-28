@@ -36,6 +36,18 @@ test("recall gives a device without allow_private no hidden memory and no privat
   assert.deepEqual(idsOf(await recall(app, closed, "Cottage roof tiles")), idsOf(await recall(app, open, "Cottage roof tiles")).filter((id) => id !== w.hidden && id !== w.pip));
 });
 
+test("a hidden memory takes no rank: a closed device sees the same order and scores as if it did not exist", async () => {
+  const query = "Pip vet limp paw";
+  const { app, closed } = await world();
+  // The same store without the vet note and the private Pip card. The visible Cottage card stays.
+  const bare = await appWith(SAMPLE.filter((s) => !s.includes("vet-visit")));
+  await indexMemories(bare.app.env, [await addSubject(bare.app, { slug: "cottage", kind: "asset", name: "the Cottage" })], () => bare.app.clock.t);
+  const shown = async (a, d) => (await recall(a, d, query, "&topK=50")).json.results.map((r) => [r.name, r.score, r.similarity]);
+  const without = await shown(bare.app);
+  assert.ok(without.length > 1, "there are several visible results to compare");
+  assert.deepEqual(await shown(app, closed), without);
+});
+
 test("without SUBJECTS on, the reply has no subjects key", async () => {
   for (const env of [{}, { SUBJECTS: "off" }]) {
     const { app } = await world(env);
