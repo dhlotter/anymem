@@ -96,4 +96,37 @@ try:
 finally:
     subprocess.run = real_run
 check("the private folder is removed even when the call fails", gone)
+
+# Claude Code leaves a projects/<slug> entry for every folder it starts in; ours is dropped when empty, kept when it holds a session
+import tempfile  # noqa: E402
+
+cfg = tempfile.mkdtemp()
+os.environ["CLAUDE_CONFIG_DIR"] = cfg
+
+
+def entry_for(cwd):
+    return os.path.join(cfg, "projects", "".join(c if c.isalnum() else "-" for c in os.path.realpath(cwd)))
+
+
+def make_run(extra):
+    def run_with_entry(args, **kw):
+        e = entry_for(kw["cwd"])
+        os.makedirs(e)
+        os.symlink("/nonexistent", os.path.join(e, "memory"))
+        if extra:
+            open(os.path.join(e, extra), "w").close()
+        seen["entry"] = e
+        return subprocess.CompletedProcess(args, 0, stdout="x", stderr="")
+    return run_with_entry
+
+
+try:
+    subprocess.run = make_run(None)
+    cc.ask("a prompt")
+    check("the project entry Claude Code left for the throwaway folder is removed", not os.path.lexists(seen["entry"]))
+    subprocess.run = make_run("s.jsonl")
+    cc.ask("a prompt")
+    check("a project entry that holds a session is never removed", os.path.exists(os.path.join(seen["entry"], "s.jsonl")))
+finally:
+    subprocess.run = real_run
 sys.exit(1 if failures else 0)
