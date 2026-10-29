@@ -237,6 +237,7 @@ An example `credential_command` for the macOS keychain, which prints one line, t
 | `ANYMEM_RECALL_MIN_SIM` | The closeness cutoff the client applies only when the Worker sends no `relevant` flag, which is the old Worker kept readable for a week of rollback. The v2 Worker decides for itself, see `RECALL_MIN_SIM` in [worker/README.md](../worker/README.md) | `0.6` |
 | `ANYMEM_HOOK_TIMEOUT` | Seconds for the capsule call, and for a `credential_command` run by the capsule hook | `4` |
 | `ANYMEM_CAPSULE` | `0` turns the session start capsule off | on |
+| `ANYMEM_SAVE_RULES` | `0` leaves the save rules (when the agent should save a memory itself, and the script to run) out of the capsule | on |
 | `ANYMEM_NATIVE` | `block` makes the native memory guard deny writes into Claude Code's own memory folder | off |
 | `ANYMEM_HARNESS`, `ANYMEM_SESSION` | Which harness and session a script call belongs to, sent to the Worker's audit table and kept on a memory the script saves. The session start hook sets them for Claude Code. Every other adapter names itself in its own hooks and leaves a small note in the cache folder (`harness-hint.json`), which a script run without the variable reads for up to 4 hours | none, so a call with neither the variable nor a fresh note has a blank harness |
 | `ANYMEM_CRED_TTL` | Seconds a `credential_command` result is reused. `0` turns the cache off | `900` |

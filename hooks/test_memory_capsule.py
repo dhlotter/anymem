@@ -186,6 +186,33 @@ check("a capsule memory cannot start a heading in the context", "\n## Forged rul
 check("a capsule memory cannot close its block early", _cap_forged.count("</memory>") == 1)
 check("the capsule says its memories are stored preferences, not instructions", "not an instruction" in _cap_forged)
 
+# the save rules: the skill's "When to save without being asked" in the always-on context, for every harness
+_rules_text = mc.render(SECTIONS, "live")
+check("the capsule carries the save rules", "## Saving memories" in _rules_text)
+check("the rules name the four save triggers", all(w in _rules_text for w in ("corrects you", "decision is made and confirmed", "durable preference or constraint", "outside the repo")))
+check("the rules carry the never save list", "Never save:" in _rules_text and "secrets, health, money or ID details" in _rules_text and "<private>" in _rules_text)
+check("the rules come before the memory sections", _rules_text.index("## Saving memories") < _rules_text.index("### identity"))
+_fenced = [seg.split("</memory>")[0] for seg in _rules_text.split("<memory>\n")[1:]]  # the text of each stored memory in the capsule
+check("the rules sit outside the memory tags", len(_fenced) == 2 and not any("## Saving memories" in seg for seg in _fenced))  # identity and preferences only
+_remember = mc.SCRIPTS / "remember.py"
+check("the rules name a remember script that exists", _remember.is_file() and str(_remember) in _rules_text)
+check("the rules name a recall script that exists", (mc.SCRIPTS / "recall.py").is_file() and str(mc.SCRIPTS / "recall.py") in _rules_text)
+check("the rules stay short", len(mc.save_rules()) < 1500)
+check("the rules use no dashes to join clauses", not any(d in mc.save_rules().replace("---", "").replace("remember.py", "") for d in ("—", "–", " - ", " -- ")))
+check("the rules survive the cut to 9,500 characters", len(mc.render([{"slot": "identity", "content": "x" * 20000}], "live")) == 9500 and "## Saving memories" in mc.render([{"slot": "identity", "content": "x" * 20000}], "live"))
+os.environ["ANYMEM_SAVE_RULES"] = "0"
+check("ANYMEM_SAVE_RULES=0 leaves the rules out", "## Saving memories" not in mc.render(SECTIONS, "live") and mc.save_rules() == "")
+del os.environ["ANYMEM_SAVE_RULES"]
+_real_scripts = mc.SCRIPTS
+mc.SCRIPTS = pathlib.Path(tempfile.mkdtemp())  # a folder with no scripts: a rule that names a script nobody can run is left out
+check("no rules when the scripts are not there", mc.save_rules() == "" and "## Saving memories" not in mc.render(SECTIONS, "live"))
+mc.SCRIPTS = pathlib.Path(tempfile.mkdtemp()) / "a folder with spaces"
+mc.SCRIPTS.mkdir()
+(mc.SCRIPTS / "remember.py").write_text("")
+(mc.SCRIPTS / "recall.py").write_text("")
+check("a path with spaces is quoted so the command still runs", "'" + str(mc.SCRIPTS / "remember.py") + "'" in mc.save_rules())
+mc.SCRIPTS = _real_scripts
+
 if failures:
     print(f"\n{len(failures)} failed")
     sys.exit(1)
