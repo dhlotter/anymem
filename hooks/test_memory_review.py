@@ -90,6 +90,18 @@ check("capture off in the config turns the review off too", stop(T0 + 9000) is N
 (pathlib.Path(os.environ["ANYMEM_CONFIG_DIR"]) / "config.json").unlink()
 check("other events are ignored", mr.hook({"hook_event_name": "SessionEnd", "session_id": "s1", "transcript_path": str(T)}, T0 + 9000) is None)
 
+def rollout(source):
+    path = TMP / f"rollout-{json.dumps(source)[:20]}.jsonl"
+    path.write_text(json.dumps({"type": "session_meta", "payload": {"id": "x", "source": source}}) + "\n")
+    return str(path)
+
+
+check("a codex exec rollout counts as headless", mr.headless(rollout("exec")))
+check("a Codex subagent rollout counts as headless", mr.headless(rollout({"subagent": "review"})))
+check("an interactive Codex rollout does not", not mr.headless(rollout("cli")) and not mr.headless(rollout("vscode")))
+check("a Claude Code transcript does not", not mr.headless(str(T)))
+check("a missing file does not raise", mr.headless(str(TMP / "missing.jsonl")) is False)
+
 _real = mr.memory_capsule.SCRIPTS
 mr.memory_capsule.SCRIPTS = pathlib.Path(tempfile.mkdtemp())
 check("no request when the scripts are not there", stop(T0 + 9000) is None)

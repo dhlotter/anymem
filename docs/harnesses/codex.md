@@ -33,6 +33,7 @@ If a marketplace named `anymem` already points at a different folder, the instal
 | SessionStart (startup, resume) | Adds your always-on capsule (identity, preferences, constraints, principles) to the session context. |
 | UserPromptSubmit | Recalls the closest memories for the prompt and adds them to the context for that turn. |
 | Stop | Starts a detached capture worker when enough new transcript has built up (60 KB and 20 minutes since the last capture). |
+| Stop | The same hook also asks the agent for the in session review (`hooks/memory_review.py`): one more short turn to save what it missed, after 60 KB and 20 minutes since the last review. Codex 0.164 honours the `{"decision": "block"}` answer as Claude Code does (proved live 2026-10-31). Never in a `codex exec` run or a subagent, whose rollout says so in its first record. |
 | SessionEnd | Starts the same worker when at least 8 KB of new transcript exists. The hook only starts a detached worker and returns, so Codex's 3 second limit on this hook is no problem, and the capture finishes after Codex has exited. |
 
 Captured memories land active, tagged `auto-capture`, and are recalled like any memory (`forget.py ID` removes one). Recall, redaction and project scoping are the shared client's, nothing here changes them.

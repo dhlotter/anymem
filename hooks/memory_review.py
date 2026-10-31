@@ -2,13 +2,14 @@
 """
 Review hook: the session's own model saves what it missed, instead of a separate model reading the transcript afterwards.
 
-Wired to Stop in Claude Code. When enough has happened since the last review, the hook answers {"decision": "block"} with a
+Wired to Stop in Claude Code, and in Codex through adapters/codex/hook.py (Codex 0.164 honours the same block). When enough has happened since the last review, the hook answers {"decision": "block"} with a
 short request, so the agent takes one more turn: it looks back over the conversation it already holds, saves what meets the
 save rules with the skill's remember script, or answers "nothing to save". The model is the one the person picked, it needs
 no transcript read and no login of its own, and the conversation is already in its context, so the turn is short.
 
 When it fires (all must hold):
-  the session is attended         a headless `claude -p` or SDK run is skipped, its final answer is someone's output
+  the session is attended         a headless `claude -p` or SDK run, a `codex exec` run or a Codex subagent is skipped, its
+                                  final answer is someone's output
   not a turn the review started   Claude Code sets stop_hook_active on the turn a Stop hook asked for, so it never loops
   capture is allowed              the same policy as capture (hm.policy: capture off, exclude_paths, exclude_sessions)
   at least 60 KB of new transcript and 20 minutes since the last review (the clock starts at the session's first Stop)
@@ -53,6 +54,20 @@ def attended() -> bool:
     return os.environ.get("CLAUDE_CODE_SESSION_ATTENDED") != "0" and not os.environ.get("CLAUDE_CODE_ENTRYPOINT", "").startswith("sdk")
 
 
+def headless(tpath: str) -> bool:
+    """True for a Codex rollout that no person is reading: `codex exec` writes source "exec" in its first record and a subagent
+    writes an object there. Interactive Codex writes a plain name (cli, vscode). A Claude Code transcript has no such record."""
+    try:
+        with open(tpath, "rb") as f:
+            first = json.loads(f.readline(65536))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(first, dict) or first.get("type") != "session_meta":
+        return False
+    source = (first.get("payload") or {}).get("source")
+    return source == "exec" or not isinstance(source, str)
+
+
 def due(st: dict, size: int, now: float) -> bool:
     return size - int(st.get("offset", 0)) >= MIN_BYTES and now - float(st.get("ts", now)) >= INTERVAL
 
@@ -73,7 +88,7 @@ def hook(payload: dict, now: float | None = None) -> dict | None:
     if payload.get("stop_hook_active") or payload.get("hook_event_name") not in (None, "Stop"):
         return None
     sid, tpath, cwd = str(payload.get("session_id") or ""), str(payload.get("transcript_path") or ""), str(payload.get("cwd") or "")
-    if not sid or not tpath or not policy.allowed(sid, cwd)[0]:
+    if not sid or not tpath or headless(tpath) or not policy.allowed(sid, cwd)[0]:
         return None
     try:
         size = os.path.getsize(tpath)

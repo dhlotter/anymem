@@ -238,7 +238,7 @@ An example `credential_command` for the macOS keychain, which prints one line, t
 | `ANYMEM_HOOK_TIMEOUT` | Seconds for the capsule call, and for a `credential_command` run by the capsule hook | `4` |
 | `ANYMEM_CAPSULE` | `0` turns the session start capsule off | on |
 | `ANYMEM_SAVE_RULES` | `0` leaves the save rules (when the agent should save a memory itself, and the script to run) out of the capsule | on |
-| `ANYMEM_REVIEW` | `0` turns off the in session review: in Claude Code, after 60 KB of new conversation and 20 minutes, a Stop hook asks the agent for one more short turn to save what it missed. Headless `claude -p` and SDK runs are never asked | on |
+| `ANYMEM_REVIEW` | `0` turns off the in session review: in Claude Code and Codex, after 60 KB of new conversation and 20 minutes, a Stop hook asks the agent for one more short turn to save what it missed. Headless `claude -p`, SDK and `codex exec` runs and Codex subagents are never asked | on |
 | `ANYMEM_NATIVE` | `block` makes the native memory guard deny writes into Claude Code's own memory folder | off |
 | `ANYMEM_HARNESS`, `ANYMEM_SESSION` | Which harness and session a script call belongs to, sent to the Worker's audit table and kept on a memory the script saves. The session start hook sets them for Claude Code. Every other adapter names itself in its own hooks and leaves a small note in the cache folder (`harness-hint.json`), which a script run without the variable reads for up to 4 hours | none, so a call with neither the variable nor a fresh note has a blank harness |
 | `ANYMEM_CRED_TTL` | Seconds a `credential_command` result is reused. `0` turns the cache off | `900` |

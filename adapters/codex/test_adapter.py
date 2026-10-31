@@ -505,6 +505,35 @@ n = len(srv.requests)
 p = run_hook("capture", json.dumps({**cap_payload, "session_id": sid + "-off"}), {**env, "ANYMEM_CAPTURE": "0"})
 time.sleep(1)
 check("ANYMEM_CAPTURE=0 turns capture off", p.stdout == "" and len(srv.requests) == n)
+
+# the in session review on Stop (hooks/memory_review.py): an interactive Codex session is asked, codex exec and a subagent never
+renv = {k: v for k, v in env.items() if not k.startswith("CLAUDE_CODE_")}  # the review reads Claude Code's headless markers
+
+
+def review_rollout(name: str, source) -> Path:
+    path = TMP / name
+    said = msg("user", "We decided the client stays in Python because readable source with no dependencies is what makes it auditable. " * 2)
+    path.write_bytes(line({"type": "session_meta", "payload": {"id": "s", "source": source}}) + line(said) + b"".join(line(msg("assistant", "x" * 4000)) for _ in range(18)))
+    return path
+
+
+def review(name: str, source, **extra):
+    path = review_rollout(name, source)
+    rsid = "review-" + name
+    state = TMP / "cache-hook" / "review-state.json"
+    old = json.loads(state.read_text()) if state.exists() else {}
+    state.write_text(json.dumps({**old, rsid: {"offset": 0, "ts": time.time() - 3600}}))  # a review is due by size and time
+    return run_hook("capture", json.dumps({**fixture("payload-Stop.json"), "session_id": rsid, "transcript_path": str(path), "cwd": str(TMP / "work"), **extra}), renv)
+
+
+p = review("cli", "cli")
+asked = json.loads(p.stdout) if p.stdout.strip() else {}
+check("hook.py capture on Stop asks an interactive Codex session for the review, in Codex's Stop protocol",
+      p.returncode == 0 and p.stderr == "" and asked.get("decision") == "block" and "nothing to save" in asked.get("reason", "") and p.stdout.endswith("}\n"))
+check("the review is not asked again on the turn it started", review("again", "cli", stop_hook_active=True).stdout == "")
+check("a codex exec run is never asked", review("exec", "exec").stdout == "")
+check("a Codex subagent is never asked", review("sub", {"subagent": {"thread_spawn": {}}}).stdout == "")
+check("SessionEnd never asks for a review", review("end", "cli", hook_event_name="SessionEnd").stdout == "")
 srv.stop()
 
 # ---------------------------------------------------------------- 7. the install command finds this adapter
