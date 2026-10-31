@@ -141,6 +141,70 @@ def state(home_dir: Path) -> dict:
     }
 
 
+def content_hash(root: Path) -> str:
+    """Codex's fingerprint of a plugin folder, as codex-rs/hooks/src/engine/plugin_fingerprint.rs computes it (rust-v0.164.0):
+    every entry depth first in byte order, each as its relative path with a length prefix, then "directory", or "file" with its
+    size and bytes. __pycache__, .venv, *.pyc and *.egg-info are left out. Raises OSError on a symlink, as Codex refuses one."""
+    import hashlib
+    import stat
+    import struct
+    h = hashlib.sha256(b"codex-plugin-bundle-v1")
+    pending = [root]
+    while pending:
+        path = pending.pop()
+        rel = os.fsencode(os.path.relpath(path, root)) if path != root else b""
+        name = os.path.basename(rel)
+        if name in (b"__pycache__", b".venv") or name.endswith((b".pyc", b".egg-info")):
+            continue
+        h.update(struct.pack("<Q", len(rel)) + rel)
+        st = os.lstat(path)
+        if stat.S_ISDIR(st.st_mode):
+            h.update(b"directory")
+            pending.extend(sorted(path.iterdir(), key=lambda p: os.fsencode(p.name), reverse=True))
+        elif stat.S_ISREG(st.st_mode):
+            h.update(b"file" + struct.pack("<Q", st.st_size) + path.read_bytes())
+        else:
+            raise OSError("unsupported plugin entry type: %s" % path)
+    return "sha256:" + h.hexdigest()
+
+
+def legacy_baseline(home_dir: Path) -> Path:
+    """Where Codex 0.164 pins the plugin contents for an approval made before it checked contents (plugin_trust.rs): a file
+    named by sha256 of the config file path and the plugin id, each with a little endian length prefix."""
+    import hashlib
+    import struct
+    h = hashlib.sha256()
+    for part in (os.fsencode(str(config_path(home_dir))), SELECTOR.encode()):
+        h.update(struct.pack("<Q", len(part)) + part)
+    return home_dir / ".hook-trust" / h.hexdigest()
+
+
+def stale_trust(home_dir: Path, trusted: list) -> str:
+    """Why Codex will refuse the approved hooks because the plugin's files changed since the approval, or ''. Codex 0.164 hashes
+    the whole installed plugin folder before each hook runs and compares it with the hash pinned at approval: a modern approval
+    stores trusted_content_hash beside trusted_hash, an older one gets a baseline file the first time a hook runs. Any change
+    to the copy (an upgrade, a reinstall, a re-add with new files) fails every hook as "plugin contents changed"."""
+    base = home_dir / "plugins" / "cache" / MARKETPLACE / PLUGIN
+    versions = sorted((d for d in base.glob("*") if d.is_dir()), key=lambda d: [int(x) if x.isdigit() else x for x in re.split(r"[.\-]", d.name)])
+    if not versions or not trusted:
+        return ""
+    text = read_config(home_dir)
+    pinned = {quoted(table_body(text, 'hooks.state."%s"' % key) or "", "trusted_content_hash") for key in trusted} - {""}
+    if not pinned:
+        try:
+            pinned = {legacy_baseline(home_dir).read_text(encoding="utf-8").strip()}
+        except OSError:
+            return ""  # no baseline yet: Codex pins the current contents the first time a hook runs
+    try:
+        current = content_hash(versions[-1])
+    except OSError as e:
+        return "Codex cannot fingerprint the installed plugin (%s), so it will not run the anymem hooks" % first_line(str(e))
+    if current in pinned:
+        return ""
+    return ("Codex no longer runs the anymem hooks: the files in %s changed since you approved them, and Codex checks a hash of the "
+            "whole plugin folder before every hook. Start codex and approve them again (review with /hooks)." % versions[-1])
+
+
 def config_problem(home_dir: Path, ask_codex: bool = True) -> str:
     """'' when config.toml is absent or valid, else why not. Python 3.11+ parses it here. Older Pythons have no TOML parser, so
     with ask_codex Codex itself is asked (it refuses a file it cannot parse), at the cost of Codex creating its empty tmp/ folder
@@ -308,6 +372,10 @@ def check() -> dict:
             problems.append("the installed plugin has no adapters/codex/hooks.json under %s. Reinstall it." % (home_dir / "plugins" / "cache"))
         if not st["trusted"]:
             pending.append("Codex has not trusted the anymem hooks yet, so they do not run. Start codex and approve them when it asks (review with /hooks).")
+        else:
+            stale = stale_trust(home_dir, st["trusted"])
+            if stale:
+                problems.append(stale)  # hooks that ran before have stopped, so it is not ok, unlike a first approval still to give
     if not shutil.which("python3"):
         problems.append("python3 is not on PATH, and the hooks run `python3`")
     problems.extend(worker_problems())

@@ -19,6 +19,8 @@ from hm import api, offline  # noqa: E402
 from hm.commands import doctor  # noqa: E402
 _real_copies = doctor._copies_check
 doctor._copies_check = lambda *a, **k: doctor.Check('plugin copies', 'info', 'not checked in these tests')  # the machine's own installed copies must not decide a test
+_real_codex = doctor._codex_trust_check
+doctor._codex_trust_check = lambda *a, **k: None  # nor the machine's own Codex approval
 
 failures = []
 TOKEN = "sk-" + "a" * 24
@@ -543,6 +545,28 @@ check("plugin copies: hooks and skill both identical is ok", _real_copies(home=_
 _c = _real_copies(home=_home)
 check("plugin copies: a stale skill alone warns", _c.status == "warn" and "skill" in _c.detail)
 check("plugin copies: no installed copies is info, not a failure", _real_copies(home=pathlib.Path(tempfile.mkdtemp())).status == "info")
+
+# Codex runs approved hooks only while its copy of the plugin hashes as it did at approval
+_saved_codex_home = os.environ.pop("CODEX_HOME", None)
+_ch = pathlib.Path(tempfile.mkdtemp())
+check("codex hooks: no Codex copy of the plugin gives no line", _real_codex(home=_ch) is None)
+_copy = _ch / ".codex" / "plugins" / "cache" / "anymem" / "anymem" / "1.0.0"
+_copy.mkdir(parents=True)
+(_copy / "hook.py").write_text("print(1)\n")
+(_ch / ".codex" / "config.toml").write_text("")
+check("codex hooks: a copy Codex never approved is a warning that says to approve", _real_codex(home=_ch).status == "warn" and "/hooks" in _real_codex(home=_ch).detail)
+(_ch / ".codex" / "config.toml").write_text('[hooks.state."anymem@anymem:adapters/codex/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:x"\n')
+from hm.commands import install as _install  # noqa: E402
+_cx = _install.load_adapters()["codex"][0]
+_base = _cx.legacy_baseline(_ch / ".codex")
+_base.parent.mkdir(parents=True)
+_base.write_text(_cx.content_hash(_copy))
+check("codex hooks: an approval that matches the copy is ok", _real_codex(home=_ch).status == "ok")
+(_copy / "hook.py").write_text("print(2)\n")
+_c = _real_codex(home=_ch)
+check("codex hooks: a copy changed since the approval is a warning with the fix", _c.status == "warn" and "approve them again" in _c.detail and "Fix:" in _c.detail)
+if _saved_codex_home is not None:
+    os.environ["CODEX_HOME"] = _saved_codex_home
 
 import argparse
 _parser = argparse.ArgumentParser()
