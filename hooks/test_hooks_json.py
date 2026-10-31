@@ -61,6 +61,7 @@ check("the prompt hook's 9 s limit is above its 8 s deadline", timeouts["UserPro
 check("the session start's 10 s limit is above its 8 s deadline", timeouts["SessionStart"] == 10 and session_start.DEADLINE_DEFAULT < timeouts["SessionStart"] - 1)
 check("the capture hooks give 5 s, and the worker they start detaches at once", all(timeouts[e] == 5 for e in ("PreCompact", "SessionEnd", "Stop")))
 check("the PreToolUse guard has 5 s", timeouts["PreToolUse"] == 5)
+check("Stop runs capture, then the in session review", [n for e, n in scripts if e == "Stop"] == ["memory_capture.py", "memory_review.py"])
 
 print()
 print(f"{len(failures)} failed" if failures else "ok")
