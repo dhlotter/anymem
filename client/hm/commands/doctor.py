@@ -115,8 +115,28 @@ def _copies_check(home=None, repo=None) -> Check:
             stale.append((tool, newest.name))
     if stale:
         names = ", ".join("%s (copy %s)" % t for t in stale)
-        return Check("plugin copies", "warn", "%s runs a copy of the hooks or skill that differs from the repo. Fix: raise version in .claude-plugin/plugin.json and .codex-plugin/plugin.json, then run claude plugin update anymem@anymem, and for Codex codex plugin remove then add anymem@anymem. See docs/install.md, Upgrading." % names)
+        return Check("plugin copies", "warn", "%s runs a copy of the hooks or skill that differs from the repo. Fix: raise version in .claude-plugin/plugin.json and .codex-plugin/plugin.json, then run claude plugin update anymem@anymem, and for Codex codex plugin remove then add anymem@anymem and approve the hooks again in Codex (/hooks). See docs/install.md, Upgrading." % names)
     return Check("plugin copies", "ok" if seen else "info", "installed plugin copies match the repo" if seen else "no installed plugin copies found")
+
+
+def _codex_trust_check(home=None) -> Optional[Check]:
+    """Codex 0.164 runs a plugin's approved hooks only while the installed plugin folder hashes to what it was at approval, so any
+    change to Codex's copy turns every anymem hook off with no message outside Codex. None when Codex has no anymem copy."""
+    from pathlib import Path
+    from hm.commands import install
+    found = install.load_adapters().get("codex", (None, None))[0]
+    if found is None:
+        return None
+    home_dir = found.codex_home(Path(home) if home else found.default_home())
+    if not (home_dir / "plugins" / "cache" / found.MARKETPLACE / found.PLUGIN).is_dir():
+        return None
+    trusted = found.state(home_dir)["trusted"]
+    if not trusted:
+        return Check("codex hooks", "warn", "Codex has not approved the anymem hooks, so they do not run. Fix: start codex and approve them (review with /hooks).")
+    stale = found.stale_trust(home_dir, trusted)
+    if stale:
+        return Check("codex hooks", "warn", stale.replace("Start codex", "Fix: start codex"))
+    return Check("codex hooks", "ok", "Codex's approval of the anymem hooks matches its copy of the plugin")
 
 
 def _reachable_check(s: config.Settings) -> Check:
@@ -372,6 +392,9 @@ def diagnose(probe: bool = False, interval: float = PROBE_INTERVAL, window: floa
     checks.append(_unsaved_check())
     checks.append(_cache_check())
     checks.append(_copies_check())
+    codex = _codex_trust_check()
+    if codex:
+        checks.append(codex)
     checks.append(_prereq_check())
     if online:
         checks.append(_usage_check(s))

@@ -288,6 +288,51 @@ with (codex / "config.toml").open("a") as f:  # what Codex writes once the user 
 chk = adapter.check()
 check("check() is ok once Codex has recorded its approval and the Worker answers /health", chk["ok"] is True and chk["problems"] == [])
 check("check() reached the Worker with a GET /health and nothing else", [(m, p) for m, p, _ in srv.requests] == [("GET", "/health")])
+
+# Codex 0.164 runs approved plugin hooks only while the installed copy hashes to what it was at approval (plugin_trust.rs)
+copy_root = codex / "plugins" / "cache" / "anymem" / "anymem" / "1.0.0"
+baseline = adapter.legacy_baseline(codex)
+kept_config, readme = (codex / "config.toml").read_text(), copy_root / "README.md"
+kept_readme = readme.read_bytes() if readme.exists() else None
+check("with no pinned baseline yet, check() stays ok (Codex pins the contents the first time a hook runs)", adapter.check()["ok"] is True)
+baseline.parent.mkdir(parents=True, exist_ok=True)
+baseline.write_text(adapter.content_hash(copy_root))
+check("a baseline that matches the installed copy is ok", adapter.check()["ok"] is True)
+(copy_root / "README.md").write_text("changed after approval\n")
+chk = adapter.check()
+check("a copy that changed since the approval is a problem, so check() is not ok and says to approve again",
+      chk["ok"] is False and any("approve them again" in p and "/hooks" in p for p in chk["problems"]))
+baseline.unlink()
+with (codex / "config.toml").open("a") as f:  # a modern approval pins the contents in config.toml instead
+    f.write('\n[hooks.state."anymem@anymem:adapters/codex/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:x"\ntrusted_content_hash = "%s"\n' % adapter.content_hash(copy_root))
+check("a trusted_content_hash that matches the copy is ok", adapter.check()["ok"] is True)
+(copy_root / "README.md").write_text("changed again\n")
+check("a trusted_content_hash that no longer matches is a problem", any("approve them again" in p for p in adapter.check()["problems"]))
+(codex / "config.toml").write_text(kept_config)  # what Codex would hold without these cases, so uninstall is still checked byte for byte
+readme.write_bytes(kept_readme) if kept_readme is not None else readme.unlink()
+baseline.parent.rmdir()
+
+bundle = Path(tempfile.mkdtemp())
+(bundle / "b").mkdir()
+(bundle / "b" / "x.py").write_text("print(1)\n")
+(bundle / "a.txt").write_text("hi\n")
+pinned = adapter.content_hash(bundle)  # the algorithm was checked against Codex 0.164 on 2026-10-31: same hash as the baseline Codex wrote for a real copy
+check("the bundle hash is stable for a fixed folder", pinned == "sha256:" + __import__("hashlib").sha256(
+      b"codex-plugin-bundle-v1" + (0).to_bytes(8, "little") + b"directory"
+      + (5).to_bytes(8, "little") + b"a.txt" + b"file" + (3).to_bytes(8, "little") + b"hi\n"
+      + (1).to_bytes(8, "little") + b"b" + b"directory"
+      + (6).to_bytes(8, "little") + b"b/x.py" + b"file" + (9).to_bytes(8, "little") + b"print(1)\n").hexdigest())
+(bundle / "b" / "__pycache__").mkdir()
+(bundle / "b" / "__pycache__" / "x.cpython-39.pyc").write_bytes(b"\0")
+(bundle / "c.pyc").write_bytes(b"\0")
+check("bytecode is left out of the hash, as Codex leaves it out", adapter.content_hash(bundle) == pinned)
+os.symlink(str(bundle / "a.txt"), str(bundle / "link"))
+try:
+    adapter.content_hash(bundle)
+    refused = False
+except OSError:
+    refused = True
+check("a symlink in the copy is refused, as Codex refuses it", refused)
 check("a trust record keyed by the plugin selector counts as ours (Codex 0.157, seen live)",
       (lambda d: ((d / "config.toml").write_text('[hooks.state."anymem@anymem:adapters/codex/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:x"\n'), adapter.state(d)["trusted"] != [])[1])(Path(tempfile.mkdtemp())))
 srv.stop()
