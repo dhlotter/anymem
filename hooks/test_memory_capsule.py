@@ -200,6 +200,8 @@ check("the rules name a recall script that exists", (mc.SCRIPTS / "recall.py").i
 check("the rules stay short", len(mc.save_rules()) < 1500)
 check("the rules use no dashes to join clauses", not any(d in mc.save_rules().replace("---", "").replace("remember.py", "") for d in ("—", "–", " - ", " -- ")))
 check("the rules survive the cut to 9,500 characters", len(mc.render([{"slot": "identity", "content": "x" * 20000}], "live")) == 9500 and "## Saving memories" in mc.render([{"slot": "identity", "content": "x" * 20000}], "live"))
+_own = mc.render([*SECTIONS, {"slot": "saving", "content": "Save as you go."}], "live")
+check("a saving section in the store replaces the plugin's rules", "## Saving memories" not in _own and "### saving" in _own)
 os.environ["ANYMEM_SAVE_RULES"] = "0"
 check("ANYMEM_SAVE_RULES=0 leaves the rules out", "## Saving memories" not in mc.render(SECTIONS, "live") and mc.save_rules() == "")
 del os.environ["ANYMEM_SAVE_RULES"]
