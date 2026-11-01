@@ -5,7 +5,7 @@
 # Claude Code keeps old versions itself. Usage: scripts/upgrade-plugins.sh
 set -eu
 NAME="anymem@anymem"
-CODEX_CACHE="$HOME/.codex/plugins/cache/anymem/anymem"
+CODEX_CACHE="${CODEX_HOME:-$HOME/.codex}/plugins/cache/anymem/anymem"
 KEEP="$(mktemp -d)"
 trap 'rm -rf "$KEEP"' EXIT
 

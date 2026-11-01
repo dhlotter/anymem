@@ -178,7 +178,9 @@ SEMVER = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]
 
 
 def _compare_versions(a: str, b: str) -> int:
-    """Codex's compare_plugin_versions: semver order when both names are semver, else plain string order."""
+    """Codex's compare_plugin_versions: semver order when both names are semver, else plain string order. Close to the semver
+    crate, not exact: names it rejects (an empty identifier, a prerelease number with a leading zero) count as semver here,
+    and build numbers that differ only in leading zeros compare equal. Cache folder names never look like that."""
     ma, mb = SEMVER.fullmatch(a), SEMVER.fullmatch(b)
     if not (ma and mb):
         return (a > b) - (a < b)
@@ -221,16 +223,31 @@ def legacy_baseline(home_dir: Path) -> Path:
     return home_dir / ".hook-trust" / h.hexdigest()
 
 
+def declared_keys(root: Path) -> list:
+    """The trust keys Codex checks for the hooks this copy declares, built as discovery.rs builds them (hook_key):
+    "<plugin id>:<hooks file>:<event in snake case>:<group index>:<handler index>"."""
+    data = json.loads((root / "adapters" / "codex" / "hooks.json").read_text(encoding="utf-8"))
+    return ["%s:adapters/codex/hooks.json:%s:%d:%d" % (SELECTOR, re.sub(r"(?<!^)(?=[A-Z])", "_", event).lower(), g, h)
+            for event, groups in data["hooks"].items() for g, group in enumerate(groups) for h, _ in enumerate(group["hooks"])]
+
+
 def stale_trust(home_dir: Path, trusted: list) -> str:
-    """Why Codex will refuse an approved anymem hook because the plugin's files changed since the approval, or ''. The caller
-    adds the fix (REAPPROVE). Codex 0.164 hashes the whole active plugin folder before each hook and compares it with that
-    hook's own pin: trusted_content_hash beside its trusted_hash, or, for a hook approved before 0.164, a baseline file written
+    """Why Codex will refuse an anymem hook it once approved, or ''. The caller adds the fix (REAPPROVE). Codex 0.164 judges
+    each hook the active copy declares on its own: it needs a trust record under that hook's key, and the whole active plugin
+    folder must hash to that record's trusted_content_hash, or, for a hook approved before 0.164, to a baseline file written
     the first time a hook runs. Any change to the copy (an upgrade, a reinstall, a re-add with new files) fails the hook as
-    "plugin contents changed". Only the selector keys count, older Codex keyed hooks by file path and checked no contents."""
-    keys = [k for k in trusted if k.startswith(SELECTOR + ":")]
+    "plugin contents changed". Records for hooks the copy no longer declares are left alone, Codex never reads them."""
     root = active_copy(home_dir)
-    if not keys or root is None:
+    if root is None:
         return ""
+    try:
+        keys = declared_keys(root)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+        return "Codex cannot read the hooks the installed plugin declares (%s), so it will not run them." % first_line(str(e))
+    label = lambda k: k.split(":")[-3]  # noqa: E731  the event name inside a key we built
+    missing = [label(k) for k in keys if k not in trusted]
+    if missing:
+        return "Codex has no approval for the anymem hooks (%s) of its current copy, so it does not run them." % ", ".join(missing)
     text = read_config(home_dir)
     pins = {k: quoted(table_body(text, 'hooks.state."%s"' % k) or "", "trusted_content_hash") for k in keys}
     if not all(pins.values()):
@@ -238,14 +255,14 @@ def stale_trust(home_dir: Path, trusted: list) -> str:
             baseline = legacy_baseline(home_dir).read_text(encoding="utf-8")  # compared as written, as Codex does
         except FileNotFoundError:
             baseline = ""  # not pinned yet: Codex pins the current contents the first time a hook runs
-        except OSError as e:
+        except (OSError, ValueError) as e:
             return "Codex cannot read its approval baseline for the anymem hooks (%s), so it will not run them." % first_line(str(e))
         pins = {k: v or baseline for k, v in pins.items()}
     try:
         current = content_hash(root)
     except OSError as e:
         return "Codex cannot fingerprint the installed plugin (%s), so it will not run the anymem hooks." % first_line(str(e))
-    stale = sorted(k.split(":")[-3] for k, v in pins.items() if v and v != current)
+    stale = [label(k) for k, v in pins.items() if v and v != current]
     if not stale:
         return ""
     return ("Codex no longer runs the anymem hooks (%s): the files in %s changed since you approved them, and Codex checks a hash "
