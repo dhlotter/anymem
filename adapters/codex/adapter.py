@@ -243,12 +243,14 @@ def stale_trust(home_dir: Path, trusted: list) -> str:
     try:
         keys = declared_keys(root)
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
-        return "Codex cannot read the hooks the installed plugin declares (%s), so it will not run them." % first_line(str(e))
+        return ("Codex cannot read the hooks the installed plugin declares (%s), so it will not run them. Reinstall the plugin with "
+                "`codex plugin add %s` first." % (first_line(str(e)), SELECTOR))
     label = lambda k: k.split(":")[-3]  # noqa: E731  the event name inside a key we built
-    missing = [label(k) for k in keys if k not in trusted]
+    text = read_config(home_dir)
+    # a record without trusted_hash (only `enabled = false`, say) is no approval, Codex rates that hook untrusted (discovery.rs)
+    missing = [label(k) for k in keys if k not in trusted or not quoted(table_body(text, 'hooks.state."%s"' % k) or "", "trusted_hash")]
     if missing:
         return "Codex has no approval for the anymem hooks (%s) of its current copy, so it does not run them." % ", ".join(missing)
-    text = read_config(home_dir)
     pins = {k: quoted(table_body(text, 'hooks.state."%s"' % k) or "", "trusted_content_hash") for k in keys}
     if not all(pins.values()):
         try:
