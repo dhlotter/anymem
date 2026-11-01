@@ -553,6 +553,8 @@ check("codex hooks: no Codex copy of the plugin gives no line", _real_codex(home
 _copy = _ch / ".codex" / "plugins" / "cache" / "anymem" / "anymem" / "1.0.0"
 _copy.mkdir(parents=True)
 (_copy / "hook.py").write_text("print(1)\n")
+(_copy / "adapters" / "codex").mkdir(parents=True)
+(_copy / "adapters" / "codex" / "hooks.json").write_text(json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "true"}]}]}}))
 (_ch / ".codex" / "config.toml").write_text("")
 check("codex hooks: a copy Codex never approved is a warning that says to approve", _real_codex(home=_ch).status == "warn" and "/hooks" in _real_codex(home=_ch).detail)
 (_ch / ".codex" / "config.toml").write_text('[hooks.state."anymem@anymem:adapters/codex/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:x"\n')
@@ -564,7 +566,7 @@ _base.write_text(_cx.content_hash(_copy))
 check("codex hooks: an approval that matches the copy is ok", _real_codex(home=_ch).status == "ok")
 (_copy / "hook.py").write_text("print(2)\n")
 _c = _real_codex(home=_ch)
-check("codex hooks: a copy changed since the approval is a warning with the fix", _c.status == "warn" and "Fix: start codex and approve the anymem hooks again" in _c.detail)
+check("codex hooks: a copy changed since the approval is a warning with the fix", _c.status == "warn" and "changed since you approved" in _c.detail and "Fix: start codex and approve the anymem hooks again" in _c.detail)
 _real_load = _install.load_module
 _install.load_module = lambda folder: (_ for _ in ()).throw(RuntimeError("adapter broke"))
 _c = _real_codex(home=_ch)
