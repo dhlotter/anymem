@@ -83,7 +83,9 @@ EOF
 
 **WARN unsaved, N unsaved memories.** A save failed and its text sits in `~/.cache/anymem/failed.jsonl`. Check the network and the Worker, then run `resave.py` (`--dry-run` lists them first). A failed `remember.py` is not queued, so run it again. Nothing retries in the background.
 
-**WARN plugin copies, a tool runs a copy that differs from the repo.** Claude Code and Codex run their own cached copy of the plugin. Raise `version` in `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, then run `scripts/upgrade-plugins.sh`.
+**WARN plugin copies, a tool runs a copy that differs from the repo.** Claude Code and Codex run their own cached copy of the plugin. Raise `version` in `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, then run `scripts/upgrade-plugins.sh`, then approve the anymem hooks again in Codex (`/hooks`).
+
+**WARN codex hooks, Codex no longer runs the anymem hooks.** Codex 0.164 and later hash the whole installed plugin folder before every hook and compare it with the hash pinned when you approved the hooks. Any change to Codex's copy (an upgrade, a reinstall, `codex plugin add` copying new files) fails every hook as `hook: Stop Failed`, and nothing outside Codex says so. Start `codex`, approve the anymem hooks again with `/hooks`, then run `doctor.py` until the line reads ok.
 
 **skip usage, usage counts need an admin token.** A device token cannot read `GET /stats`. Not a problem.
 

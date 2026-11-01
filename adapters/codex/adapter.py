@@ -141,6 +141,9 @@ def state(home_dir: Path) -> dict:
     }
 
 
+REAPPROVE = "Start codex and approve the anymem hooks again (review with /hooks)."
+
+
 def content_hash(root: Path) -> str:
     """Codex's fingerprint of a plugin folder, as codex-rs/hooks/src/engine/plugin_fingerprint.rs computes it (rust-v0.164.0):
     every entry depth first in byte order, each as its relative path with a length prefix, then "directory", or "file" with its
@@ -162,47 +165,91 @@ def content_hash(root: Path) -> str:
             h.update(b"directory")
             pending.extend(sorted(path.iterdir(), key=lambda p: os.fsencode(p.name), reverse=True))
         elif stat.S_ISREG(st.st_mode):
-            h.update(b"file" + struct.pack("<Q", st.st_size) + path.read_bytes())
+            h.update(b"file" + struct.pack("<Q", st.st_size))
+            with open(path, "rb") as f:  # in chunks, the copy holds the repo's .git with packs of tens of MB
+                for chunk in iter(lambda: f.read(1 << 16), b""):
+                    h.update(chunk)
         else:
             raise OSError("unsupported plugin entry type: %s" % path)
     return "sha256:" + h.hexdigest()
 
 
+SEMVER = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?")
+
+
+def _compare_versions(a: str, b: str) -> int:
+    """Codex's compare_plugin_versions: semver order when both names are semver, else plain string order."""
+    ma, mb = SEMVER.fullmatch(a), SEMVER.fullmatch(b)
+    if not (ma and mb):
+        return (a > b) - (a < b)
+
+    def ids(text):  # a prerelease or build part: numeric identifiers sort below text ones and by value
+        return [(0, int(x), "") if x.isdigit() else (1, 0, x) for x in text.split(".")] if text else []
+
+    def key(m):
+        return (tuple(int(x) for x in m.groups()[:3]), m.group(4) is None, ids(m.group(4)), ids(m.group(5)))
+    ka, kb = key(ma), key(mb)
+    return (ka > kb) - (ka < kb)
+
+
+def active_copy(home_dir: Path) -> "Path | None":
+    """The folder Codex runs the plugin from, as codex-rs/core-plugin-common/src/installed.rs active_plugin_version picks it:
+    real folders (not symlinks) with a valid name, "local" when present, else the highest version."""
+    import functools
+    base = home_dir / "plugins" / "cache" / MARKETPLACE / PLUGIN
+    try:
+        names = [d.name for d in base.iterdir() if d.is_dir() and not d.is_symlink() and re.fullmatch(r"[A-Za-z0-9._+-]+", d.name) and d.name not in (".", "..")]
+    except OSError:
+        return None
+    if not names:
+        return None
+    return base / ("local" if "local" in names else sorted(names, key=functools.cmp_to_key(_compare_versions))[-1])
+
+
 def legacy_baseline(home_dir: Path) -> Path:
     """Where Codex 0.164 pins the plugin contents for an approval made before it checked contents (plugin_trust.rs): a file
-    named by sha256 of the config file path and the plugin id, each with a little endian length prefix."""
+    named by sha256 of the config file path and the plugin id, each with a little endian length prefix. Codex resolves CODEX_HOME
+    to its real path when the variable is set (utils/home-dir), and uses ~/.codex as it is otherwise, so the name does too."""
     import hashlib
     import struct
+    cfg = config_path(home_dir)
+    if os.environ.get("CODEX_HOME") and Path(os.environ["CODEX_HOME"]) == home_dir:
+        cfg = config_path(home_dir.resolve())
     h = hashlib.sha256()
-    for part in (os.fsencode(str(config_path(home_dir))), SELECTOR.encode()):
+    for part in (os.fsencode(str(cfg)), SELECTOR.encode()):
         h.update(struct.pack("<Q", len(part)) + part)
     return home_dir / ".hook-trust" / h.hexdigest()
 
 
 def stale_trust(home_dir: Path, trusted: list) -> str:
-    """Why Codex will refuse the approved hooks because the plugin's files changed since the approval, or ''. Codex 0.164 hashes
-    the whole installed plugin folder before each hook runs and compares it with the hash pinned at approval: a modern approval
-    stores trusted_content_hash beside trusted_hash, an older one gets a baseline file the first time a hook runs. Any change
-    to the copy (an upgrade, a reinstall, a re-add with new files) fails every hook as "plugin contents changed"."""
-    base = home_dir / "plugins" / "cache" / MARKETPLACE / PLUGIN
-    versions = sorted((d for d in base.glob("*") if d.is_dir()), key=lambda d: [int(x) if x.isdigit() else x for x in re.split(r"[.\-]", d.name)])
-    if not versions or not trusted:
+    """Why Codex will refuse an approved anymem hook because the plugin's files changed since the approval, or ''. The caller
+    adds the fix (REAPPROVE). Codex 0.164 hashes the whole active plugin folder before each hook and compares it with that
+    hook's own pin: trusted_content_hash beside its trusted_hash, or, for a hook approved before 0.164, a baseline file written
+    the first time a hook runs. Any change to the copy (an upgrade, a reinstall, a re-add with new files) fails the hook as
+    "plugin contents changed". Only the selector keys count, older Codex keyed hooks by file path and checked no contents."""
+    keys = [k for k in trusted if k.startswith(SELECTOR + ":")]
+    root = active_copy(home_dir)
+    if not keys or root is None:
         return ""
     text = read_config(home_dir)
-    pinned = {quoted(table_body(text, 'hooks.state."%s"' % key) or "", "trusted_content_hash") for key in trusted} - {""}
-    if not pinned:
+    pins = {k: quoted(table_body(text, 'hooks.state."%s"' % k) or "", "trusted_content_hash") for k in keys}
+    if not all(pins.values()):
         try:
-            pinned = {legacy_baseline(home_dir).read_text(encoding="utf-8").strip()}
-        except OSError:
-            return ""  # no baseline yet: Codex pins the current contents the first time a hook runs
+            baseline = legacy_baseline(home_dir).read_text(encoding="utf-8")  # compared as written, as Codex does
+        except FileNotFoundError:
+            baseline = ""  # not pinned yet: Codex pins the current contents the first time a hook runs
+        except OSError as e:
+            return "Codex cannot read its approval baseline for the anymem hooks (%s), so it will not run them." % first_line(str(e))
+        pins = {k: v or baseline for k, v in pins.items()}
     try:
-        current = content_hash(versions[-1])
+        current = content_hash(root)
     except OSError as e:
-        return "Codex cannot fingerprint the installed plugin (%s), so it will not run the anymem hooks" % first_line(str(e))
-    if current in pinned:
+        return "Codex cannot fingerprint the installed plugin (%s), so it will not run the anymem hooks." % first_line(str(e))
+    stale = sorted(k.split(":")[-3] for k, v in pins.items() if v and v != current)
+    if not stale:
         return ""
-    return ("Codex no longer runs the anymem hooks: the files in %s changed since you approved them, and Codex checks a hash of the "
-            "whole plugin folder before every hook. Start codex and approve them again (review with /hooks)." % versions[-1])
+    return ("Codex no longer runs the anymem hooks (%s): the files in %s changed since you approved them, and Codex checks a hash "
+            "of the whole plugin folder before every hook." % (", ".join(stale), root))
 
 
 def config_problem(home_dir: Path, ask_codex: bool = True) -> str:
@@ -319,7 +366,7 @@ def install(options) -> dict:
     if problem:
         raise AdapterError("%s. Fix that first, nothing was changed." % problem)
     if st["plugin"] and st["enabled"] and st["marketplace"] is not None:
-        return {"changed": [], "notes": ["the anymem plugin was already installed, nothing changed"] + trust_notes(st)}
+        return {"changed": [], "notes": ["the anymem plugin was already installed, nothing changed"] + trust_notes(st, home_dir)}
     changed = []
     cfg = config_path(home_dir)
     backup = cfg.with_name(cfg.name + BACKUP_SUFFIX)
@@ -342,12 +389,13 @@ def install(options) -> dict:
             run_codex(["plugin", "marketplace", "remove", MARKETPLACE], home_dir)
         raise
     changed = [str(cfg), *changed, str(home_dir / "plugins" / "cache" / MARKETPLACE)]
-    return {"changed": changed, "notes": trust_notes(state(home_dir))}
+    return {"changed": changed, "notes": trust_notes(state(home_dir), home_dir)}
 
 
-def trust_notes(st: dict) -> list:
+def trust_notes(st: dict, home_dir: Path) -> list:
     if st["trusted"]:
-        return ["Codex has recorded its approval for the anymem hooks."]
+        stale = stale_trust(home_dir, st["trusted"])  # a fresh copy is the usual way an approval goes stale
+        return [stale + " " + REAPPROVE] if stale else ["Codex has recorded its approval for the anymem hooks."]
     return ["Codex does not run the new hooks until you approve them. Start codex and approve the anymem hooks when it asks (review them with /hooks). Start a new session after that. Nothing was approved for you."]
 
 
@@ -375,7 +423,7 @@ def check() -> dict:
         else:
             stale = stale_trust(home_dir, st["trusted"])
             if stale:
-                problems.append(stale)  # hooks that ran before have stopped, so it is not ok, unlike a first approval still to give
+                problems.append(stale + " " + REAPPROVE)  # hooks that ran before have stopped, so it is not ok, unlike a first approval still to give
     if not shutil.which("python3"):
         problems.append("python3 is not on PATH, and the hooks run `python3`")
     problems.extend(worker_problems())

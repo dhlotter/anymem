@@ -123,18 +123,19 @@ def _codex_trust_check(home=None) -> Optional[Check]:
     change to Codex's copy turns every anymem hook off with no message outside Codex. None when Codex has no anymem copy."""
     from pathlib import Path
     from hm.commands import install
-    found = install.load_adapters().get("codex", (None, None))[0]
-    if found is None:
-        return None
-    home_dir = found.codex_home(Path(home) if home else found.default_home())
-    if not (home_dir / "plugins" / "cache" / found.MARKETPLACE / found.PLUGIN).is_dir():
-        return None
-    trusted = found.state(home_dir)["trusted"]
-    if not trusted:
-        return Check("codex hooks", "warn", "Codex has not approved the anymem hooks, so they do not run. Fix: start codex and approve them (review with /hooks).")
-    stale = found.stale_trust(home_dir, trusted)
+    try:
+        cx = install.load_module(install.adapters_dir() / "codex")  # the built in adapter only, not every adapter folder
+        home_dir = cx.codex_home(Path(home) if home else cx.default_home())
+        if cx.active_copy(home_dir) is None:
+            return None
+        trusted = cx.state(home_dir)["trusted"]
+        if not trusted:
+            return Check("codex hooks", "warn", "Codex has not approved the anymem hooks, so they do not run. Fix: start codex and approve them (review with /hooks).")
+        stale = cx.stale_trust(home_dir, trusted)
+    except Exception as e:  # a broken adapter or an odd Codex folder must not stop the other checks
+        return Check("codex hooks", "warn", "could not check Codex's approval of the anymem hooks: %s" % e)
     if stale:
-        return Check("codex hooks", "warn", stale.replace("Start codex", "Fix: start codex"))
+        return Check("codex hooks", "warn", "%s Fix: %s" % (stale, cx.REAPPROVE[0].lower() + cx.REAPPROVE[1:]))
     return Check("codex hooks", "ok", "Codex's approval of the anymem hooks matches its copy of the plugin")
 
 
