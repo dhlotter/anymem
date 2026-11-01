@@ -583,14 +583,23 @@ _copy.mkdir(parents=True)
 check("codex hooks: a copy Codex never approved is a warning that says to approve", _real_codex(home=_ch).status == "warn" and "/hooks" in _real_codex(home=_ch).detail)
 (_ch / ".codex" / "config.toml").write_text('[hooks.state."anymem@anymem:adapters/codex/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:x"\n')
 from hm.commands import install as _install  # noqa: E402
-_cx = _install.load_adapters()["codex"][0]
+_cx = _install.load_module(_install.adapters_dir() / "codex")
 _base = _cx.legacy_baseline(_ch / ".codex")
 _base.parent.mkdir(parents=True)
 _base.write_text(_cx.content_hash(_copy))
 check("codex hooks: an approval that matches the copy is ok", _real_codex(home=_ch).status == "ok")
 (_copy / "hook.py").write_text("print(2)\n")
 _c = _real_codex(home=_ch)
-check("codex hooks: a copy changed since the approval is a warning with the fix", _c.status == "warn" and "approve them again" in _c.detail and "Fix:" in _c.detail)
+check("codex hooks: a copy changed since the approval is a warning with the fix", _c.status == "warn" and "Fix: start codex and approve the anymem hooks again" in _c.detail)
+_real_load = _install.load_module
+_install.load_module = lambda folder: (_ for _ in ()).throw(RuntimeError("adapter broke"))
+_c = _real_codex(home=_ch)
+check("codex hooks: an adapter that raises gives a warning line, not a crashed doctor", _c.status == "warn" and "adapter broke" in _c.detail)
+_install.load_module = _real_load
+doctor._codex_trust_check = lambda *a, **k: doctor.Check("codex hooks", "warn", "stubbed")
+_checks = doctor.diagnose(probe=False, interval=10, window=90, sleep=noop)
+check("codex hooks: diagnose() includes the codex line when Codex has a copy", any(c.name == "codex hooks" for c in _checks))
+doctor._codex_trust_check = lambda *a, **k: None
 if _saved_codex_home is not None:
     os.environ["CODEX_HOME"] = _saved_codex_home
 

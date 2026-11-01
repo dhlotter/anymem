@@ -294,23 +294,77 @@ copy_root = codex / "plugins" / "cache" / "anymem" / "anymem" / "1.0.0"
 baseline = adapter.legacy_baseline(codex)
 kept_config, readme = (codex / "config.toml").read_text(), copy_root / "README.md"
 kept_readme = readme.read_bytes() if readme.exists() else None
+KEY = "anymem@anymem:adapters/codex/hooks.json:%s:0:0"
+
+
+def approvals(**pins):
+    """config.toml as Codex 0.164 keeps it: one selector keyed record per hook, with its content pin or none (an older approval)."""
+    (codex / "config.toml").write_text(kept_config + "".join('\n[hooks.state."%s"]\ntrusted_hash = "sha256:x"\n%s' % (
+        KEY % event, 'trusted_content_hash = "%s"\n' % pin if pin else "") for event, pin in pins.items()))
+
+
+approvals(stop=None, session_start=None)
 check("with no pinned baseline yet, check() stays ok (Codex pins the contents the first time a hook runs)", adapter.check()["ok"] is True)
 baseline.parent.mkdir(parents=True, exist_ok=True)
 baseline.write_text(adapter.content_hash(copy_root))
 check("a baseline that matches the installed copy is ok", adapter.check()["ok"] is True)
-(copy_root / "README.md").write_text("changed after approval\n")
+check("install notes say the approval is recorded while it matches", adapter.trust_notes(adapter.state(codex), codex) == ["Codex has recorded its approval for the anymem hooks."])
+readme.write_text("changed after approval\n")
 chk = adapter.check()
 check("a copy that changed since the approval is a problem, so check() is not ok and says to approve again",
-      chk["ok"] is False and any("approve them again" in p and "/hooks" in p for p in chk["problems"]))
+      chk["ok"] is False and any("approve the anymem hooks again" in p and "/hooks" in p for p in chk["problems"]))
+check("install notes say to approve again after a copy changed", "approve the anymem hooks again" in adapter.trust_notes(adapter.state(codex), codex)[0])
+baseline.write_text(adapter.content_hash(copy_root) + "\n")
+check("the baseline is compared as written, as Codex compares it, so a trailing newline does not match", adapter.check()["ok"] is False)
 baseline.unlink()
-with (codex / "config.toml").open("a") as f:  # a modern approval pins the contents in config.toml instead
-    f.write('\n[hooks.state."anymem@anymem:adapters/codex/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:x"\ntrusted_content_hash = "%s"\n' % adapter.content_hash(copy_root))
-check("a trusted_content_hash that matches the copy is ok", adapter.check()["ok"] is True)
-(copy_root / "README.md").write_text("changed again\n")
-check("a trusted_content_hash that no longer matches is a problem", any("approve them again" in p for p in adapter.check()["problems"]))
-(codex / "config.toml").write_text(kept_config)  # what Codex would hold without these cases, so uninstall is still checked byte for byte
+fresh, old = adapter.content_hash(copy_root), "sha256:" + "0" * 64
+approvals(stop=fresh, session_start=fresh)
+check("a trusted_content_hash on every hook that matches the copy is ok", adapter.check()["ok"] is True)
+approvals(stop=fresh, session_start=old)
+chk = adapter.check()
+check("one hook with a stale pin among fresh ones is a problem that names that hook, as Codex checks each hook on its own",
+      chk["ok"] is False and any("(session_start)" in p for p in chk["problems"]))
+baseline.write_text(old)
+approvals(stop=fresh, session_start=None)
+check("a hook with no content pin falls back to the baseline file, here a stale one", any("(session_start)" in p for p in adapter.check()["problems"]))
+baseline.unlink()
+(codex / "config.toml").write_text(kept_config)
+check("trust records keyed by file path (older Codex, no content check) are not judged", adapter.stale_trust(codex, adapter.state(codex)["trusted"]) == "")
 readme.write_bytes(kept_readme) if kept_readme is not None else readme.unlink()
 baseline.parent.rmdir()
+
+# the active copy is picked as Codex picks it (core-plugin-common installed.rs active_plugin_version)
+versions = Path(tempfile.mkdtemp())
+vbase = versions / "plugins" / "cache" / "anymem" / "anymem"
+for name in ("2.1.3", "2.1.10", "2.2.0-beta.1", "notes~", "zzz-not-semver"):
+    (vbase / name).mkdir(parents=True)
+check("the active copy is the highest version by semver, with names that are not semver compared as text",
+      adapter.active_copy(versions).name == "zzz-not-semver")
+(vbase / "zzz-not-semver").rmdir()
+check("2.1.10 sorts above 2.1.3, and a prerelease above both when its numbers are higher", adapter.active_copy(versions).name == "2.2.0-beta.1")
+(vbase / "2.2.0").mkdir()
+check("a release sorts above its own prerelease", adapter.active_copy(versions).name == "2.2.0")
+os.symlink(str(vbase / "2.1.3"), str(vbase / "9.9.9"))
+check("a symlinked version folder is skipped, as Codex skips it", adapter.active_copy(versions).name == "2.2.0")
+(vbase / "local").mkdir()
+check("a folder named local always wins, and a mix of local and numbers no longer raises", adapter.active_copy(versions).name == "local")
+check("no cache folder gives no active copy", adapter.active_copy(Path(tempfile.mkdtemp())) is None)
+
+# the baseline file name, against one Codex 0.164 wrote itself on 2026-10-31 for a throwaway CODEX_HOME
+_saved = os.environ.pop("CODEX_HOME", None)
+check("the legacy baseline name matches the file Codex wrote",
+      adapter.legacy_baseline(Path("/private/tmp/claude-501/-opt-drive-vault/8b8c2ee9-863d-4939-b029-b28fddb8c00a/scratchpad/codex-refresh/home")).name
+      == "e0eeb0463ad1187093d899e95406a74c052c6ef59f652c1d8a037bc73a466705")
+real_home = Path(tempfile.mkdtemp())
+link = Path(tempfile.mkdtemp()) / "link"
+os.symlink(str(real_home), str(link))
+unresolved = adapter.legacy_baseline(link).name
+os.environ["CODEX_HOME"] = str(link)
+check("with CODEX_HOME set, the baseline name uses its real path, as Codex resolves it",
+      adapter.legacy_baseline(link).name != unresolved and adapter.legacy_baseline(link).name == adapter.legacy_baseline(real_home.resolve()).name)
+os.environ.pop("CODEX_HOME")
+if _saved is not None:
+    os.environ["CODEX_HOME"] = _saved
 
 bundle = Path(tempfile.mkdtemp())
 (bundle / "b").mkdir()
