@@ -1,7 +1,8 @@
 """`doctor`: one line per check, then a verdict. Exits 0 when every check passes, 1 otherwise.
 
 Checks run in order: config, reachable (with the Worker's version and vector index from /health), auth, capsule, unsaved, capsule
-cache, usage (counts and the last nightly run from /stats), backup, subjects (counts by status and whether the system acts on its own, only when the Worker has them), and with --probe the vector arm. The vector arm asks the Worker
+cache, usage (counts and the last nightly run from /stats), backup, subjects (counts by status and whether the system acts on its own, only when the Worker has them), rules (feedback memories recalled
+so often they act as standing rules, only when there are any), and with --probe the vector arm. The vector arm asks the Worker
 to overwrite one probe vector (not a memory) and polls until a metadata filtered query finds it. It writes no memory.
 Nothing here prints a token or any other secret.
 """
@@ -293,6 +294,27 @@ def _subjects_check(s: config.Settings) -> Optional[Check]:
     return Check("subjects", "info", detail + _auto_text(s))
 
 
+RULE_RECALLS = 10  # ponytail: a fixed bar, a setting when someone's store needs a different one
+
+
+def _rules_check(s: config.Settings) -> Optional[Check]:
+    """Live feedback memories recalled RULE_RECALLS times or more. They act as standing rules, so they belong in the person's rules
+    file or the skill they are about, where they load without a recall. Informational, the move is the skill's Promote pass, run by
+    the session's own model. Capsule sections are already always on and are left out. None, so no line, when there are none or the
+    Worker does not answer."""
+    try:
+        reply = api.request("GET", "/list?" + urlencode({"type": "feedback", "min_recalls": RULE_RECALLS, "n": 500}), timeout=TIMEOUT, settings=s)
+    except (api.ApiError, api.NetworkError):
+        return None
+    rows = [e for e in shapes.entries(reply) if e.get("status") in ("active", "canonical") and (e.get("recall_count") or 0) >= RULE_RECALLS
+            and not any(str(t).startswith("capsule") for t in e.get("tags") or [])]
+    if not rows:
+        return None
+    more = "+" if isinstance(reply, dict) and reply.get("next_cursor") else ""
+    return Check("rules", "info", "%d%s feedback memories were recalled %d or more times, so they act as standing rules. Fix: ask your agent for "
+                 "the anymem promote pass, which moves each into your rules file or its skill and retires the memory." % (len(rows), more, RULE_RECALLS))
+
+
 def _probe(s: config.Settings, interval: float, window: float, sleep: Callable[[float], None]) -> List[Check]:
     """Overwrite the Worker's probe vector, then poll until it is found through the metadata filter or the window ends.
     Found without the filter but not with it is the missing metadata index. Found nowhere is a warning, not a failure, because
@@ -354,9 +376,9 @@ def diagnose(probe: bool = False, interval: float = PROBE_INTERVAL, window: floa
     if online:
         checks.append(_usage_check(s))
         checks.append(_backup_check(s))
-        subjects = _subjects_check(s)
-        if subjects:
-            checks.append(subjects)
+        for extra in (_subjects_check(s), _rules_check(s)):
+            if extra:
+                checks.append(extra)
     else:
         checks.append(Check("usage", "skip", "skipped, fix the failing check above first"))
         checks.append(Check("backup", "skip", "skipped, fix the failing check above first"))

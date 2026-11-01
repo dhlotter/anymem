@@ -61,7 +61,7 @@ A Worker refusal (HTTP 422) exits 2 with the reason. A rate limit (40 writes per
 
 ```
 get.py ID [--version N] [--deleted] [--json]
-list.py [--tag T]... [--status S] [--origin O] [--type T] [--project P] [--days N] [--max-recalls N] [--deleted] [-n N] [--json]
+list.py [--tag T]... [--status S] [--origin O] [--type T] [--project P] [--days N] [--min-recalls N] [--max-recalls N] [--deleted] [-n N] [--json]
 history.py ID [--json]
 ```
 
@@ -210,6 +210,7 @@ One line per check, then a verdict. Exit 0 when no check failed, warnings allowe
 | usage | counts from `GET /stats` (admin token), today's capture numbers and the last nightly job |
 | backup | the latest nightly backup, a warning when it is over 2 days old or the bucket is missing |
 | subjects | `3 active, 1 proposed, 0 stale, 0 private, auto on, briefs off` from `GET /subjects`. Proposed subjects wait for your click, and a stale subject has a brief that failed a check, whose memories changed, or that the model could not build 3 nights in a row. The last part says whether the system acts on subjects by itself, from the switches in `GET /stats` (admin token). It reads `auto off` when `SUBJECTS_AUTO` is not on, `auto on, briefs on` or `auto on, briefs off` for the third switch, `SUBJECTS_BRIEFS`, and `auto set but SUBJECTS is off, so it does nothing` when only the automation switch is set. A Worker that does not report the switches gets the counts and nothing more. No line at all when the Worker does not answer `GET /subjects` |
+| rules | live feedback memories recalled 10 or more times, capsule sections left out. They act as standing rules, and the skill's Promote pass moves them into your rules file or their skill. No line when there are none |
 | vector | with `--probe`, whether a probe vector is found through the metadata filter, waiting up to 3 minutes |
 
 `--json` prints the checks and the verdict as one object. The probe writes one vector and no memory, and waits up to 3 minutes.

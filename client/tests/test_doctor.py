@@ -68,6 +68,7 @@ class FakeWorker:
             "vread": "filtered",  # GET /vectorize-probe: a mode, or a list with one mode per poll, the last repeating
             "backup": {"ok": True, "backups": [], "latest": {"day": date.today().isoformat(), "entries": 42, "size": 1000, "key": "k"}},
             "subjects": api.ApiError(404, "not found"),  # GET /subjects: an older Worker has no such route
+            "rules": {"ok": True, "entries": [], "next_cursor": None},  # GET /list for the rules line: none by default
             "stats": {"count": 42, "by_status": {"active": 40, "canonical": 2}, "unvectorized": 2, "unclassified": 5,
                       "capture": {"accepted": 3, "rejected": 1, "reasons": {"secret": 1}}, "last_run": {"job": "nightly", "ok": True, "summary": {}}},
         }
@@ -127,6 +128,9 @@ class FakeWorker:
             return self._answer(self.b["backup"])
         if path == "/subjects":
             return self._answer(self.b["subjects"])
+        if path.startswith("/list?"):
+            self.queries.append(parse_qs(urlsplit(path).query))
+            return self._answer(self.b["rules"])
         raise AssertionError("unexpected call %s %s" % (method, path))
 
     def forgets(self):
@@ -460,6 +464,28 @@ for label, answer in (("older Worker", api.ApiError(404, "not found")), ("token 
 w = FakeWorker(health=api.NetworkError("timed out"), subjects={"ok": True, "subjects": []})
 checks, rc, out = scenario("subjects skipped when unreachable", w)
 check("subjects: not asked when the Worker is unreachable", not any(c.name == "subjects" for c in checks) and not any(c[1] == "/subjects" for c in w.calls))
+
+# 20. rules from GET /list: live feedback memories recalled 10+ times, capsule sections and stale rows left out, no line when none
+def mem(i, recalls=12, status="active", tags=()):
+    return {"id": "m%d" % i, "type": "feedback", "status": status, "recall_count": recalls, "tags": list(tags)}
+
+
+w = FakeWorker(rules={"ok": True, "entries": [mem(1), mem(2, status="canonical"), mem(3, status="deprecated"), mem(4, tags=["capsule:core"]), mem(5, recalls=3)], "next_cursor": None})
+checks, rc, out = scenario("rules", w)
+q = w.queries[-1]
+check("rules: asks for feedback memories with min_recalls", q["type"] == ["feedback"] and q["min_recalls"] == [str(doctor.RULE_RECALLS)])
+check("rules: counts live rows only, without capsule sections or rows under the bar, info, exit 0",
+      status(checks, "rules").status == "info" and status(checks, "rules").detail.startswith("2 feedback memories") and "promote pass" in status(checks, "rules").detail and rc == 0)
+w = FakeWorker(rules={"ok": True, "entries": [mem(1)], "next_cursor": "c"})
+checks, rc, out = scenario("rules more", w)
+check("rules: a full page says there are more", status(checks, "rules").detail.startswith("1+ feedback"))
+for label, answer in (("none", {"ok": True, "entries": [], "next_cursor": None}), ("error", api.ApiError(500, "boom")), ("network", api.NetworkError("reset")), ("odd shape", ["x"])):
+    w = FakeWorker(rules=answer)
+    checks, rc, out = scenario("rules " + label, w)
+    check("rules (%s): no line at all and exit 0" % label, not any(c.name == "rules" for c in checks) and rc == 0)
+w = FakeWorker(health=api.NetworkError("timed out"))
+checks, rc, out = scenario("rules skipped when unreachable", w)
+check("rules: not asked when the Worker is unreachable", not any(c[1].startswith("/list") for c in w.calls))
 
 # a one-letter token is too short to scrub: the fix text must come out intact
 fresh(True)

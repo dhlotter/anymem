@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+Memories that act as rules get a way out of the store. On the author's store 200 feedback memories had been recalled 10 or more times, and the most recalled ones repeated a rules file or a skill word for word.
+
+1. **Doctor.** A `rules` line counts the live feedback memories recalled 10 or more times, capsule sections left out, and points at the Promote pass. No line when there are none.
+2. **Promote pass.** A new section of the skill. The agent lists those memories, deprecates the ones the rules file or a skill already says, and proposes a line for the rest, which it adds only on the person's yes.
+3. **list.py** takes `--min-recalls`. The Worker already had the filter.
+
 ## [2.1.3] 2026-10-28
 
 Fewer proposals to click. After a day of automatic mode, 10 of 13 waiting proposals came from a single mention each, three of them the same television under three names.

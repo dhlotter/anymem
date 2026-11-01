@@ -154,10 +154,10 @@ srv.replies["GET /list"] = (200, {"ok": True, "entries": [{**ENTRY, "id": ID}, {
 rc, out, err = run("get", ID[:8], env={"ANYMEM_CACHE_DIR": tempfile.mkdtemp()})
 check("an id prefix that fits two memories asks for more of it", rc == 1 and "matches 2" in err)
 srv.replies["GET /list"] = (200, LISTING)
-rc, out, err = run("list", "--tag", "a", "--tag", "b", "--status", "canonical", "--origin", "capture", "--type", "user", "--project", "demo", "--days", "7", "--max-recalls", "0", "-n", "5")
+rc, out, err = run("list", "--tag", "a", "--tag", "b", "--status", "canonical", "--origin", "capture", "--type", "user", "--project", "demo", "--days", "7", "--min-recalls", "10", "--max-recalls", "0", "-n", "5")
 q = query(last()[1])
 check("list sends every filter", rc == 0 and q["tag"] == ["a", "b"] and q["status"] == ["canonical"] and q["origin"] == ["capture"] and q["type"] == ["user"] and q["project"] == ["demo"]
-      and q["max_recalls"] == ["0"] and q["n"] == ["5"] and int(q["after"][0]) > 1_700_000_000_000)
+      and q["min_recalls"] == ["10"] and q["max_recalls"] == ["0"] and q["n"] == ["5"] and int(q["after"][0]) > 1_700_000_000_000)
 check("list prints one line per memory with the full id", "tabs-over-spaces" in out and "other" in out and ID in out)
 ids_file = Path(cache) / "ids.json"
 check("the ids a script printed are kept locally, ids only, mode 0600", ID in json.loads(ids_file.read_text()) and stat.S_IMODE(ids_file.stat().st_mode) == 0o600 and "tabs" not in ids_file.read_text())
