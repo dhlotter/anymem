@@ -199,7 +199,8 @@ export async function recall(env, params, now) {
       score: round(score, 6),
       similarity: round(hit.similarity, 4),
       ...(rerank.has(row.id) ? { rerank: round(rerank.get(row.id), 4) } : {}),
-      relevant: checks.some((c) => c.met),
+      // A deprecated memory is closed history: a search still finds it, a hook never injects it.
+      relevant: row.status !== "deprecated" && checks.some((c) => c.met),
       ...(params.explain
         ? { why: { dense_score: round(hit.similarity, 4), dense_rank: hit.denseRank, keyword_rank: hit.keywordRank, coverage: round(hit.coverage, 3), query_words: words, keyword_terms: hit.terms.map((t) => ({ term: t.term, level: t.level, idf: round(t.idf, 2) })), ...(params.checks ? { checks } : {}) } }
         : {}),

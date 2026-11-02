@@ -221,6 +221,17 @@ test("relevant by cosine, with RECALL_MIN_SIM moving the cutoff", async () => {
   assert.equal((await recall(app, query)).json.results[0].relevant, true);
 });
 
+test("a deprecated memory is still found but never relevant, so a hook does not inject it", async () => {
+  const { app, ids } = await appWith([note("tapir-facts", "Tapir facts", "tapirs eat leaves and swim")]);
+  app.env.RERANK = "0";
+  const query = `tapir facts tapirs eat leaves and swim ${UNKNOWN}`;
+  assert.equal((await app.call("/status", { method: "POST", body: { id: ids[0], status: "deprecated" } })).status, 200);
+  const hit = (await recall(app, query)).json.results[0];
+  assert.equal(hit.id, ids[0]);
+  assert.equal(hit.status, "deprecated");
+  assert.equal(hit.relevant, false);
+});
+
 async function bigStore(extra) {
   // idf only reaches 5 in a store of a few hundred memories, so add fillers directly and index them in two passes.
   const { app, ids } = await appWith(extra);

@@ -7,6 +7,7 @@ Memories that act as rules get a way out of the store. On the author's store 200
 1. **Doctor.** A `rules` line counts the live feedback memories recalled 10 or more times, capsule sections left out, and points at the Promote pass. No line when there are none.
 2. **Promote pass.** A new section of the skill. The agent lists those memories, deprecates the ones the rules file or a skill already says, and proposes a line for the rest, which it adds only on the person's yes.
 3. **list.py** takes `--min-recalls`. The Worker already had the filter.
+4. **Fixed.** A deprecated memory was still marked `relevant` by recall, so every hook went on injecting it into prompts after the Promote pass had retired it. Recall still finds a deprecated memory when asked, and no longer marks it relevant.
 
 ## [2.1.3] 2026-10-28
 
