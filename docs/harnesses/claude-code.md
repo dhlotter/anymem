@@ -28,6 +28,7 @@ They are listed in `hooks/hooks.json`, which uses `${CLAUDE_PLUGIN_ROOT}` for pa
 | `PreCompact` | any | `memory_capture.py` | 5 s | Starts a detached capture worker when there is enough new transcript |
 | `SessionEnd` | any | `memory_capture.py` | 5 s | The same, at the end of a session |
 | `Stop` | any | `memory_capture.py` | 5 s | The same, as a backstop for long sessions. Needs 60 KB and 20 minutes |
+| `Stop` | any | `memory_review.py` | 5 s | Asks the session's own agent for one more short turn to save what it missed (`{"decision": "block"}`). Needs 60 KB and 20 minutes since the last review and 150 characters from the person. Never in a headless run, never on the turn it started. Off with `ANYMEM_REVIEW=0` |
 | `PreToolUse` | `Write`, `Edit`, `MultiEdit`, `Bash` | `native_memory_guard.py` | 5 s | Does nothing unless `ANYMEM_NATIVE=block`. See below |
 
 Context reaches the model through `hookSpecificOutput.additionalContext`. The capture hooks return at once and do the work in a detached process, so they never hold up a session. Details are in [architecture](../architecture.md). A hook that fails prints nothing and lets the session carry on.

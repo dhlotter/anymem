@@ -5,7 +5,7 @@
 # Claude Code keeps old versions itself. Usage: scripts/upgrade-plugins.sh
 set -eu
 NAME="anymem@anymem"
-CODEX_CACHE="$HOME/.codex/plugins/cache/anymem/anymem"
+CODEX_CACHE="${CODEX_HOME:-$HOME/.codex}/plugins/cache/anymem/anymem"
 KEEP="$(mktemp -d)"
 trap 'rm -rf "$KEEP"' EXIT
 
@@ -33,3 +33,5 @@ if ! codex plugin add "$NAME"; then
 fi
 restore_kept
 echo "Done. Restart Claude Code and Codex chats when convenient to load the new version."
+echo "Codex refuses every anymem hook once its copy changes: start codex and approve the anymem hooks again (/hooks)."
+python3 "$(dirname "$0")/../skills/anymem/scripts/install.py" --check codex || true

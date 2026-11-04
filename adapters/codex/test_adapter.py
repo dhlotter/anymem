@@ -283,11 +283,137 @@ srv = fake_worker.start(recall=[], capsule=[])
 os.environ["ANYMEM_URL"] = srv.url
 os.environ["ANYMEM_TOKEN"] = "test-token-" + os.urandom(4).hex()
 trust_key = str(codex / "plugins" / "cache" / "anymem" / "anymem" / "1.0.0" / "adapters" / "codex" / "hooks.json")
-with (codex / "config.toml").open("a") as f:  # what Codex writes once the user approves the hooks
-    f.write('\n[hooks.state."%s:user_prompt_submit:0:0"]\ntrusted_hash = "sha256:def"\n' % trust_key)
+with (codex / "config.toml").open("a") as f:  # what Codex 0.157 and 0.164 write once the user approves the hooks, one record per hook
+    for key in adapter.declared_keys(codex / "plugins" / "cache" / "anymem" / "anymem" / "1.0.0"):
+        f.write('\n[hooks.state."%s"]\ntrusted_hash = "sha256:def"\n' % key)
 chk = adapter.check()
 check("check() is ok once Codex has recorded its approval and the Worker answers /health", chk["ok"] is True and chk["problems"] == [])
 check("check() reached the Worker with a GET /health and nothing else", [(m, p) for m, p, _ in srv.requests] == [("GET", "/health")])
+
+# Codex 0.164 runs approved plugin hooks only while the installed copy hashes to what it was at approval (plugin_trust.rs)
+copy_root = codex / "plugins" / "cache" / "anymem" / "anymem" / "1.0.0"
+baseline = adapter.legacy_baseline(codex)
+kept_config, readme = (codex / "config.toml").read_text(), copy_root / "README.md"
+kept_readme = readme.read_bytes() if readme.exists() else None
+EVENTS = [k.split(":")[-3] for k in adapter.declared_keys(copy_root)]
+check("the trust keys are built from the copy's hooks.json as Codex builds them",
+      adapter.declared_keys(copy_root) == ["anymem@anymem:adapters/codex/hooks.json:%s:0:0" % e for e in ("session_start", "user_prompt_submit", "stop", "session_end")])
+
+
+def approvals(default, extra="", **override):
+    """config.toml as Codex 0.164 keeps it: one record per declared hook, each with its own content pin or none (an approval
+    made before 0.164). `override` sets one hook's pin, a pin of False leaves that hook's record out."""
+    pins = {e: override.get(e, default) for e in EVENTS}
+    (codex / "config.toml").write_text(cfg_text + extra + "".join('\n[hooks.state."anymem@anymem:adapters/codex/hooks.json:%s:0:0"]\ntrusted_hash = "sha256:x"\n%s' % (
+        e, 'trusted_content_hash = "%s"\n' % pin if pin else "") for e, pin in pins.items() if pin is not False))
+
+
+approvals(None)
+check("with no pinned baseline yet, check() stays ok (Codex pins the contents the first time a hook runs)", adapter.check()["ok"] is True)
+baseline.parent.mkdir(parents=True, exist_ok=True)
+baseline.write_text(adapter.content_hash(copy_root))
+check("a baseline that matches the installed copy is ok", adapter.check()["ok"] is True)
+check("install notes say the approval is recorded while it matches", adapter.trust_notes(adapter.state(codex), codex) == ["Codex has recorded its approval for the anymem hooks."])
+readme.write_text("changed after approval\n")
+chk = adapter.check()
+check("a copy that changed since the approval is a problem, so check() is not ok and says to approve again",
+      chk["ok"] is False and any("approve the anymem hooks again" in p and "/hooks" in p for p in chk["problems"]))
+check("install notes say to approve again after a copy changed", "approve the anymem hooks again" in adapter.trust_notes(adapter.state(codex), codex)[0])
+baseline.write_text(adapter.content_hash(copy_root) + "\n")
+check("the baseline is compared as written, as Codex compares it, so a trailing newline does not match", adapter.check()["ok"] is False)
+baseline.write_bytes(b"\xff\xfe not text")
+check("a baseline that is not text is reported, it does not crash check() or the install notes",
+      any("cannot read its approval baseline" in p for p in adapter.check()["problems"]) and "cannot read" in adapter.trust_notes(adapter.state(codex), codex)[0])
+baseline.unlink()
+fresh, old = adapter.content_hash(copy_root), "sha256:" + "0" * 64
+approvals(fresh)
+check("a trusted_content_hash on every hook that matches the copy is ok", adapter.check()["ok"] is True)
+approvals(fresh, session_start=old)
+chk = adapter.check()
+check("one hook with a stale pin among fresh ones is a problem that names that hook, as Codex checks each hook on its own",
+      chk["ok"] is False and any("(session_start)" in p for p in chk["problems"]))
+approvals(fresh, session_end=False)
+check("a declared hook with no approval record is a problem that names it", any("no approval" in p and "(session_end)" in p for p in adapter.check()["problems"]))
+approvals(fresh, session_end=False, extra='\n[hooks.state."anymem@anymem:adapters/codex/hooks.json:session_end:0:0"]\nenabled = false\n')
+check("a record with no trusted_hash is no approval, as Codex rates it untrusted", any("no approval" in p and "(session_end)" in p for p in adapter.check()["problems"]))
+broken = Path(tempfile.mkdtemp())
+(broken / "plugins" / "cache" / "anymem" / "anymem" / "1.0.0" / "adapters" / "codex").mkdir(parents=True)
+(broken / "plugins" / "cache" / "anymem" / "anymem" / "1.0.0" / "adapters" / "codex" / "hooks.json").write_text("{ not json")
+check("a hooks.json Codex cannot parse says to reinstall, not only to approve again", "Reinstall the plugin" in adapter.stale_trust(broken, ["x"]))
+check("the keys assume the manifest's hooks file, so the manifest still names it",
+      json.loads((HERE.parent.parent / ".codex-plugin" / "plugin.json").read_text())["hooks"] == "./adapters/codex/hooks.json")
+approvals(fresh, extra='\n[hooks.state."anymem@anymem:hooks/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:x"\ntrusted_content_hash = "%s"\n' % old)
+check("a leftover record for a hook the copy no longer declares is ignored, as Codex never reads it", adapter.check()["ok"] is True)
+baseline.write_text(old)
+approvals(fresh, session_start=None)
+check("a hook with no content pin falls back to the baseline file, here a stale one", any("(session_start)" in p for p in adapter.check()["problems"]))
+(codex / "config.toml").write_text(cfg_text + '\n[hooks.state."%s:stop:0:0"]\ntrusted_hash = "sha256:def"\n' % trust_key)  # only a record keyed by file path, as older Codex wrote, stale baseline in place
+check("records keyed by file path (older Codex) are not approvals Codex 0.164 reads, so that is reported, whatever the baseline says",
+      adapter.state(codex)["trusted"] != [] and "no approval" in adapter.stale_trust(codex, adapter.state(codex)["trusted"]))
+baseline.unlink()
+(codex / "config.toml").write_text(kept_config)
+readme.write_bytes(kept_readme) if kept_readme is not None else readme.unlink()
+baseline.parent.rmdir()
+
+# the active copy is picked as Codex picks it (core-plugin-common installed.rs active_plugin_version)
+versions = Path(tempfile.mkdtemp())
+vbase = versions / "plugins" / "cache" / "anymem" / "anymem"
+for name in ("2.1.3", "2.1.10", "2.2.0-beta.1", "notes~", "zzz-not-semver"):
+    (vbase / name).mkdir(parents=True)
+check("the active copy is the highest version by semver, with names that are not semver compared as text",
+      adapter.active_copy(versions).name == "zzz-not-semver")
+(vbase / "zzz-not-semver").rmdir()
+check("a prerelease sorts above lower releases when its numbers are higher", adapter.active_copy(versions).name == "2.2.0-beta.1")
+(vbase / "2.2.0").mkdir()
+check("a release sorts above its own prerelease", adapter.active_copy(versions).name == "2.2.0")
+os.symlink(str(vbase / "2.1.3"), str(vbase / "9.9.9"))
+check("a symlinked version folder is skipped, as Codex skips it", adapter.active_copy(versions).name == "2.2.0")
+(vbase / "local").mkdir()
+check("a folder named local always wins, and a mix of local and numbers no longer raises", adapter.active_copy(versions).name == "local")
+check("no cache folder gives no active copy", adapter.active_copy(Path(tempfile.mkdtemp())) is None)
+import functools  # noqa: E402
+order = sorted(["2.1.10", "2.1.3", "2.2.0-beta.10", "2.2.0-beta.2", "2.2.0", "2.2.0-alpha"], key=functools.cmp_to_key(adapter._compare_versions))
+check("versions sort by number, not as text: 2.1.3 below 2.1.10, beta.2 below beta.10, alpha below beta, a release above its prereleases",
+      order == ["2.1.3", "2.1.10", "2.2.0-alpha", "2.2.0-beta.2", "2.2.0-beta.10", "2.2.0"])
+
+# a known answer: on 2026-10-31 Codex 0.164, run with CODEX_HOME set to the path below (already a real path), wrote its baseline
+# for anymem@anymem as .hook-trust/e0eeb046... The path is only the input string, it does not need to exist.
+_saved = os.environ.pop("CODEX_HOME", None)
+check("the legacy baseline name matches the file Codex wrote",
+      adapter.legacy_baseline(Path("/private/tmp/claude-501/-opt-drive-vault/8b8c2ee9-863d-4939-b029-b28fddb8c00a/scratchpad/codex-refresh/home")).name
+      == "e0eeb0463ad1187093d899e95406a74c052c6ef59f652c1d8a037bc73a466705")
+real_home = Path(tempfile.mkdtemp())
+link = Path(tempfile.mkdtemp()) / "link"
+os.symlink(str(real_home), str(link))
+unresolved = adapter.legacy_baseline(link).name
+os.environ["CODEX_HOME"] = str(link)
+check("with CODEX_HOME set, the baseline name uses its real path, as Codex resolves it",
+      adapter.legacy_baseline(link).name != unresolved and adapter.legacy_baseline(link).name == adapter.legacy_baseline(real_home.resolve()).name)
+os.environ.pop("CODEX_HOME")
+if _saved is not None:
+    os.environ["CODEX_HOME"] = _saved
+
+bundle = Path(tempfile.mkdtemp())
+(bundle / "b").mkdir()
+(bundle / "b" / "x.py").write_text("print(1)\n")
+(bundle / "a.txt").write_text("hi\n")
+pinned = adapter.content_hash(bundle)  # the algorithm was checked against Codex 0.164 on 2026-10-31: same hash as the baseline Codex wrote for a real copy
+check("the bundle hash is stable for a fixed folder", pinned == "sha256:" + __import__("hashlib").sha256(
+      b"codex-plugin-bundle-v1" + (0).to_bytes(8, "little") + b"directory"
+      + (5).to_bytes(8, "little") + b"a.txt" + b"file" + (3).to_bytes(8, "little") + b"hi\n"
+      + (1).to_bytes(8, "little") + b"b" + b"directory"
+      + (6).to_bytes(8, "little") + b"b/x.py" + b"file" + (9).to_bytes(8, "little") + b"print(1)\n").hexdigest())
+(bundle / "b" / "__pycache__").mkdir()
+(bundle / "b" / "__pycache__" / "x.cpython-39.pyc").write_bytes(b"\0")
+(bundle / "c.pyc").write_bytes(b"\0")
+check("bytecode is left out of the hash, as Codex leaves it out", adapter.content_hash(bundle) == pinned)
+os.symlink(str(bundle / "a.txt"), str(bundle / "link"))
+try:
+    adapter.content_hash(bundle)
+    refused = False
+except OSError:
+    refused = True
+check("a symlink in the copy is refused, as Codex refuses it", refused)
 check("a trust record keyed by the plugin selector counts as ours (Codex 0.157, seen live)",
       (lambda d: ((d / "config.toml").write_text('[hooks.state."anymem@anymem:adapters/codex/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:x"\n'), adapter.state(d)["trusted"] != [])[1])(Path(tempfile.mkdtemp())))
 srv.stop()
@@ -505,6 +631,35 @@ n = len(srv.requests)
 p = run_hook("capture", json.dumps({**cap_payload, "session_id": sid + "-off"}), {**env, "ANYMEM_CAPTURE": "0"})
 time.sleep(1)
 check("ANYMEM_CAPTURE=0 turns capture off", p.stdout == "" and len(srv.requests) == n)
+
+# the in session review on Stop (hooks/memory_review.py): an interactive Codex session is asked, codex exec and a subagent never
+renv = {k: v for k, v in env.items() if not k.startswith("CLAUDE_CODE_")}  # the review reads Claude Code's headless markers
+
+
+def review_rollout(name: str, source) -> Path:
+    path = TMP / name
+    said = msg("user", "We decided the client stays in Python because readable source with no dependencies is what makes it auditable. " * 2)
+    path.write_bytes(line({"type": "session_meta", "payload": {"id": "s", "source": source}}) + line(said) + b"".join(line(msg("assistant", "x" * 4000)) for _ in range(18)))
+    return path
+
+
+def review(name: str, source, **extra):
+    path = review_rollout(name, source)
+    rsid = "review-" + name
+    state = TMP / "cache-hook" / "review-state.json"
+    old = json.loads(state.read_text()) if state.exists() else {}
+    state.write_text(json.dumps({**old, rsid: {"offset": 0, "ts": time.time() - 3600}}))  # a review is due by size and time
+    return run_hook("capture", json.dumps({**fixture("payload-Stop.json"), "session_id": rsid, "transcript_path": str(path), "cwd": str(TMP / "work"), **extra}), renv)
+
+
+p = review("cli", "cli")
+asked = json.loads(p.stdout) if p.stdout.strip() else {}
+check("hook.py capture on Stop asks an interactive Codex session for the review, in Codex's Stop protocol",
+      p.returncode == 0 and p.stderr == "" and asked.get("decision") == "block" and "nothing to save" in asked.get("reason", "") and p.stdout.endswith("}\n"))
+check("the review is not asked again on the turn it started", review("again", "cli", stop_hook_active=True).stdout == "")
+check("a codex exec run is never asked", review("exec", "exec").stdout == "")
+check("a Codex subagent is never asked", review("sub", {"subagent": {"thread_spawn": {}}}).stdout == "")
+check("SessionEnd never asks for a review", review("end", "cli", hook_event_name="SessionEnd").stdout == "")
 srv.stop()
 
 # ---------------------------------------------------------------- 7. the install command finds this adapter

@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.3.0] 2026-11-04
+
+The session's own model saves what it missed, and the Codex check says when an approval has gone stale. The Worker is unchanged. The plugin version moves so Claude Code and Codex replace their copies of the hooks, and Codex needs the hooks approved again.
+
+1. **In session review.** When a session has grown by 60 KB since the last review, 20 minutes have passed and the person typed at least 150 characters, the Stop hook asks the agent for one more short turn. The agent saves what meets the save rules with the skill's scripts, or answers "nothing to save". It uses the model the person picked, so it needs no login and no transcript read of its own. Headless `claude -p`, SDK, `codex exec` and subagent runs are skipped, the turn the review started is never asked again, and the capture policy applies. `ANYMEM_REVIEW=0` turns it off. It runs in Claude Code and, through the existing Stop hook of the Codex adapter, in Codex. Proved live on Claude Code 2.1.309 headless and on codex-cli 0.164.0.
+2. **Capture keeps running.** The end of session capture still runs after a review and only adds what is missing. Whether it can go is a later decision, after a week of measuring both.
+3. **Save rules in the capsule.** The skill's "when to save without being asked" reaches an agent only if it invokes the skill, and the capsule is the one block every harness gets at session start. A short version of the rules, with this install's script paths, now sits in it. A `saving` section in the store replaces the built in rules, so they are never carried twice. `ANYMEM_SAVE_RULES=0` leaves them out.
+4. **Counting saves.** `bench/insession.py` counts, per harness and day, the eligible sessions, the sessions where the agent saved, the save calls and the sessions where the extractor proposed something.
+5. **Codex approvals that go stale.** Codex 0.164 hashes the whole installed plugin folder before every hook and compares it with the hash pinned at approval. Any change to the copy fails every anymem hook as "hook: Stop Failed", and `install.py --check codex` still said ok. No Codex call reached the Worker for two days after the copy moved from 2.1.1 to 2.1.3. The Codex check and the doctor now report a stale approval, name the hook, judge exactly the hooks the copy declares, pick the active copy the way Codex does, and say to reinstall when `hooks.json` cannot be read. A hook record with no `trusted_hash` counts as no approval, as it does in Codex. The troubleshooting guide and `scripts/upgrade-plugins.sh` say to approve the hooks again after a copy changes.
+
 ## [2.2.0] 2026-11-04
 
 Cline is the seventh harness. Cline 3 (the `cline` command line and the Cline desktop app) has no shell hooks anymem can use, but it runs JavaScript plugins, so the adapter is a plugin in the same shape as Kilo's. It was built against the shipped Cline code, tested offline, and run in live Cline CLI sessions on 2026-10-27.

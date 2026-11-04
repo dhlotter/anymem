@@ -3,7 +3,8 @@
 
     session-start   prints the session start as SessionStart context: the memory capsule, then the status lines
     prompt          prints the memories recalled for the prompt as UserPromptSubmit context
-    capture         starts a detached capture worker (wire it to Stop and SessionEnd), reading Codex's rollout format
+    capture         starts a detached capture worker (wire it to Stop and SessionEnd), reading Codex's rollout format, and on
+                    Stop prints the in session review request when one is due (hooks/memory_review.py)
 
 The shared hooks in hooks/ already speak Codex's protocol, so the plugin's own hooks file can call them directly and
 nothing here is required. This script adds what is specific to Codex: it skips the internal session Codex runs for its own
@@ -45,7 +46,11 @@ def handle(arg: str, raw) -> str:
             return ""
         import memory_capture
         memory_capture.hook(payload_in, "codex")
-        return ""
+        if payload_in["hook_event_name"] != "Stop":
+            return ""
+        import memory_review  # the same Stop hook, so the hooks file and Codex's trust in it stay as they are
+        answer = memory_review.hook({**payload_in, "stop_hook_active": bool(raw.get("stop_hook_active")) if isinstance(raw, dict) else False})
+        return json.dumps(answer) + "\n" if answer else ""
     if arg == "session-start":
         import session_start  # the same session start as Claude Code: capsule, then the status lines
         return emit.render("SessionStart", session_start.context())
