@@ -68,7 +68,11 @@ Hook events were probed live on 2026-10-08 by running each harness with a loggin
 | ZCode 0.16.9 | SessionStart, UserPromptSubmit, Stop | yes | `additionalContext`, seen in the model request | [zcode](docs/harnesses/zcode.md) |
 | DSH 0.2.0 rc2 | SessionStart, UserPromptSubmit, Stop, through a Claude style bridge | yes | `additionalContext`, the model repeated the marker | [dsh](docs/harnesses/dsh.md) |
 | Kilo 7.7.5 | chat.message, session.idle, session compacting, system prompt transform, in a JavaScript plugin | yes | system prompt, proven | [kilo](docs/harnesses/kilo.md) |
-| Cline 3.0.74 | beforeRun, beforeModel, afterRun, in a JavaScript plugin | read from the model request | a `hook_context` message in the request, not yet proven in a live run | [cline](docs/harnesses/cline.md) |
+| Cline 3.0.74 | beforeRun, beforeModel, afterRun, in a JavaScript plugin | read from the model request | a `hook_context` message in the request, proven in a live run on 2026-10-27, capture end to end not verified | [cline](docs/harnesses/cline.md) |
+
+**Tiers.** Claude Code, Codex and ZCode are the supported tier. The author uses them every day and checks them on each release. Antigravity, DSH, Kilo and Cline are best effort. Each has live proof in its guide, but a new release of the harness can break an adapter before anyone notices, and the fix lands when the author next uses that tool.
+
+**Where it works.** In coding agents that can run hooks or plugins, in a terminal or inside a desktop app. It does not work in browser chats, Cowork or chat apps such as claude.ai and chatgpt.com. They run no hooks, and anymem has no MCP server on purpose, see [why scripts and hooks, not MCP](docs/why-skill-not-mcp.md).
 
 A harness we do not ship takes one adapter. See [add a harness](docs/add-a-harness.md).
 
