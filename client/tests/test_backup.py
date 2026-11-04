@@ -12,6 +12,7 @@ import os
 import stat
 import sys
 import tempfile
+from datetime import date, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -29,7 +30,7 @@ def check(name, cond):
         failures.append(name)
 
 
-DAY = "2026-10-10"
+DAY = (date.today() - timedelta(days=1)).isoformat()  # relative to today, because write_backup prunes copies older than --keep days by the real clock
 E = lambda i, **kw: {"id": f"e{i}", "name": f"mem-{i}", "content": f"---\nname: mem-{i}\n---\ntext {i}", "tags": [], **kw}
 PAYLOAD = {"ok": True, "format": 2, "entries": [E(1), E(2)], "versions": [], "questions": [], "links": [], "devices": []}
 
@@ -114,13 +115,14 @@ check("the summary line counts memories, versions and links", "2300 memories, 23
 
 # a copy far smaller than the last one is refused, the old one stays
 out2 = Path(tempfile.mkdtemp())
-first = backup.write_backup({**PAYLOAD, "entries": [E(i) for i in range(10)]}, out2, 30, "2026-10-01")[0]
+day1, day2 = ((date.today() - timedelta(days=n)).isoformat() for n in (3, 2))
+first = backup.write_backup({**PAYLOAD, "entries": [E(i) for i in range(10)]}, out2, 30, day1)[0]
 try:
-    backup.write_backup({**PAYLOAD, "entries": [E(1)]}, out2, 30, "2026-10-02")
+    backup.write_backup({**PAYLOAD, "entries": [E(1)]}, out2, 30, day2)
     refused = None
 except backup.BackupError as e:
     refused = e
-check("a copy more than 20 percent smaller is refused with exit code 2", refused is not None and refused.code == 2 and not (out2 / "anymem-2026-10-02.json.gz").exists() and first.exists())
+check("a copy more than 20 percent smaller is refused with exit code 2", refused is not None and refused.code == 2 and not (out2 / ("anymem-%s.json.gz" % day2)).exists() and first.exists())
 
 # markdown copy: live memories only, named by name
 md = Path(tempfile.mkdtemp())
