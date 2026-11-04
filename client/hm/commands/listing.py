@@ -18,6 +18,7 @@ def register(parser):
     parser.add_argument("--type", choices=("user", "feedback", "project", "reference"))
     parser.add_argument("--project")
     parser.add_argument("--days", type=float, help="only memories created in the last N days")
+    parser.add_argument("--min-recalls", type=int, help="only memories recalled at least this many times")
     parser.add_argument("--max-recalls", type=int, help="only memories recalled at most this many times")
     parser.add_argument("--deleted", action="store_true", help="the trash (the last 14 days)")
     parser.add_argument("-n", type=int, default=20, help="how many to show, up to 500 (default 20)")
@@ -32,6 +33,8 @@ def query(ns, cursor=None, now=None) -> list:
             q.append((key, getattr(ns, key)))
     if ns.days:
         q.append(("after", int(((now if now is not None else time.time()) - ns.days * 86400) * 1000)))
+    if ns.min_recalls is not None:
+        q.append(("min_recalls", ns.min_recalls))
     if ns.max_recalls is not None:
         q.append(("max_recalls", ns.max_recalls))
     if ns.deleted:
