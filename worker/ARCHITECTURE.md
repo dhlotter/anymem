@@ -1,6 +1,6 @@
 # Worker architecture
 
-Version 2.1.3. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
+Version 2.2.0. This file says how the Worker is built and why. The routes and settings are in [README.md](README.md). Plain JavaScript modules, no dependencies and no build step.
 
 ## Module map
 
@@ -43,7 +43,7 @@ Version 2.1.3. This file says how the Worker is built and why. The routes and se
 | `extract/extract.js` | `POST /extract`: strip our blocks, ask the model, screen every proposal. Stores nothing. |
 | `limits.js` | The write limit and the model call limit on `write_counter`. |
 | `counters.js` | Daily counters on `counters`, collected and written in one batch, read by `/stats`. |
-| `harnesses.js` | The list of harness ids, aliases and proper names, and the label rules (Imported or Unknown for a blank harness, by origin, and Anymem for the `system` caller of the Worker's own background work). The client keeps the same list in `client/hm/harnesses.py` and a test in each language fails when they differ. |
+| `harnesses.js` | The list of harness ids, aliases and proper names, and the label rules (Imported or Unknown for a blank harness, by origin, and Anymem for the `system` caller of the Worker's own background work). The client keeps the same list in `client/hm/harnesses.py` and a test in each language fails when they differ. The ids today are `claude`, `codex`, `agy`, `dsh`, `kilo`, `zcode` and `cline`. |
 | `outcomes.js` | The `X-Anymem-Outcomes` header. Parses `injected=2,quiet=5` and adds it to the counters `hook.recall.<word>.<harness>`. |
 | `ai.js` | `askJson` (one JSON mode call to the small model, null on any failure) and `asData` (text into a prompt with tags removed). |
 | `capsule.js` | The core capsule: build from memories, cache in `capsule_cache`, ETag, `GET /prompt-capsules/core`, and `onChange` which drops the cache. |

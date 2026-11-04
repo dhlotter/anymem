@@ -55,7 +55,7 @@ Setup checks these and names what is missing before it creates anything.
    Give the token one account, not all of them. If the token sees several accounts anyway, set `CLOUDFLARE_ACCOUNT_ID` or pass `--account-id`.
 3. **Python 3.9 or newer.** macOS ships 3.9. The client, the hooks and setup use only the standard library.
 4. **git**, only to fetch or update the repo, and so the client can find a project folder.
-5. **A harness to wire.** At least one of Claude Code, Codex, Antigravity, DSH, Kilo or ZCode. `install.py --list` shows what was found.
+5. **A harness to wire.** At least one of Claude Code, Codex, Antigravity, DSH, Kilo, ZCode or Cline. `install.py --list` shows what was found.
 6. **Cloudflare Zero Trust**, free for up to 50 users, only if you choose `--access`.
 
 macOS and Linux are the targets. Windows is out of scope.
@@ -126,6 +126,8 @@ Doctor prints one line per check and a verdict. It exits 0 when no check failed 
 ## Install the hooks for other harnesses
 
 `install.py --list` shows every adapter your copy has and whether it found that harness. `install.py NAME` prints a plan, asks to confirm, installs, then runs the adapter's check. `--dry-run` prints the plan and writes nothing, `--yes` skips the question, `--check` verifies, `--uninstall NAME` removes only this product's own entries, and `--new NAME` writes a starter adapter for a harness we do not ship (see [add a harness](add-a-harness.md)). The guides are in `docs/harnesses/`.
+
+Cline is installed through its own command line. `install.py cline` generates a small plugin folder, `~/.config/anymem/cline-plugin`, and runs `cline plugin install` on it, so Cline makes its own copy under `~/.cline/plugins/_installed/local`. Restart Cline or start a new session afterwards. It needs Cline 3 or later, from the `cline` command on your PATH, the Cline desktop app, or `ANYMEM_CLINE_BIN`. See [cline](harnesses/cline.md).
 
 ## Connect another machine
 
@@ -244,7 +246,7 @@ An example `credential_command` for the macOS keychain, which prints one line, t
 | `ANYMEM_REPO`, `ANYMEM_HOME_DIR` | Where `bootstrap.sh` fetches from and to | `https://github.com/dhlotter/anymem.git`, `~/.local/share/anymem` |
 | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Read by `setup` and `uninstall`. The token is never written to disk | none |
 
-Harness specific variables (`ANYMEM_ZCODE_APP`, `ANYMEM_ZCODE_NODE`, `ANYMEM_DSH_SESSIONS`, `ANYMEM_CODEX_BIN`, `ANYMEM_PLUGIN_ROOT`, `ANYMEM_PYTHON`) are in the guide for each harness or its adapter.
+Harness specific variables (`ANYMEM_ZCODE_APP`, `ANYMEM_ZCODE_NODE`, `ANYMEM_DSH_SESSIONS`, `ANYMEM_CODEX_BIN`, `ANYMEM_CLINE_BIN`, `ANYMEM_PLUGIN_ROOT`, `ANYMEM_PYTHON`) are in the guide for each harness or its adapter.
 
 ### Limits fixed in the code
 
