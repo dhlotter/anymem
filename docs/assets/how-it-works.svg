@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 470" width="960" height="470" role="img" aria-labelledby="t d">
+  <title id="t">How anymem works</title>
+  <desc id="d">Agents on several machines read and write one memory store in your own Cloudflare account. At session start they load the always on rules, on every prompt they get the closest memories, and during the session they save what they learn.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: #1f2328; }
+    .h { font-size: 15px; font-weight: 600; }
+    .s { font-size: 12.5px; fill: #59636e; }
+    .chip { font-size: 12px; font-weight: 500; }
+    .lab { font-size: 13px; font-weight: 600; }
+    .lab2 { font-size: 12px; fill: #59636e; }
+    .foot { font-size: 14px; font-weight: 600; fill: #1f2328; }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8c959f"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="470" rx="18" fill="#ffffff"/>
+  <rect x="0.5" y="0.5" width="959" height="469" rx="18" fill="none" stroke="#d1d9e0"/>
+
+  <!-- machines -->
+  <text x="40" y="44" class="h">Your machines</text>
+  <g>
+    <rect x="40" y="62" width="250" height="96" rx="12" fill="#f6f8fa" stroke="#d1d9e0"/>
+    <text x="58" y="88" class="h">Laptop</text>
+    <rect x="58" y="104" width="94" height="26" rx="13" fill="#ddf4ff" stroke="#54aeff"/><text x="105" y="121" class="chip" text-anchor="middle">Claude Code</text>
+    <rect x="160" y="104" width="62" height="26" rx="13" fill="#ddf4ff" stroke="#54aeff"/><text x="191" y="121" class="chip" text-anchor="middle">Codex</text>
+    <text x="58" y="148" class="s">terminal or desktop app</text>
+  </g>
+  <g>
+    <rect x="40" y="176" width="250" height="96" rx="12" fill="#f6f8fa" stroke="#d1d9e0"/>
+    <text x="58" y="202" class="h">Work laptop</text>
+    <rect x="58" y="218" width="94" height="26" rx="13" fill="#ddf4ff" stroke="#54aeff"/><text x="105" y="235" class="chip" text-anchor="middle">Claude Code</text>
+    <rect x="160" y="218" width="64" height="26" rx="13" fill="#ddf4ff" stroke="#54aeff"/><text x="192" y="235" class="chip" text-anchor="middle">ZCode</text>
+    <text x="58" y="262" class="s">its own device token</text>
+  </g>
+  <g>
+    <rect x="40" y="290" width="250" height="96" rx="12" fill="#f6f8fa" stroke="#d1d9e0"/>
+    <text x="58" y="316" class="h">Server</text>
+    <rect x="58" y="332" width="62" height="26" rx="13" fill="#ddf4ff" stroke="#54aeff"/><text x="89" y="349" class="chip" text-anchor="middle">Codex</text>
+    <rect x="128" y="332" width="48" height="26" rx="13" fill="#ddf4ff" stroke="#54aeff"/><text x="152" y="349" class="chip" text-anchor="middle">Kilo</text>
+    <rect x="184" y="332" width="56" height="26" rx="13" fill="#ddf4ff" stroke="#54aeff"/><text x="212" y="349" class="chip" text-anchor="middle">Cline</text>
+    <text x="58" y="376" class="s">scheduled jobs, no screen</text>
+  </g>
+
+  <!-- flows -->
+  <line x1="300" y1="132" x2="600" y2="132" stroke="#8c959f" stroke-width="2" marker-end="url(#a)"/>
+  <text x="450" y="112" class="lab" text-anchor="middle">Session start</text>
+  <text x="450" y="152" class="lab2" text-anchor="middle">loads your always on rules</text>
+
+  <line x1="300" y1="224" x2="600" y2="224" stroke="#8c959f" stroke-width="2" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="450" y="204" class="lab" text-anchor="middle">Every prompt</text>
+  <text x="450" y="244" class="lab2" text-anchor="middle">adds the closest memories, or nothing</text>
+
+  <line x1="300" y1="316" x2="600" y2="316" stroke="#8c959f" stroke-width="2" marker-end="url(#a)"/>
+  <text x="450" y="296" class="lab" text-anchor="middle">During the session</text>
+  <text x="450" y="336" class="lab2" text-anchor="middle">the agent saves what it learned</text>
+
+  <!-- cloudflare account -->
+  <rect x="610" y="62" width="310" height="324" rx="14" fill="#fff8f0" stroke="#f6a34a"/>
+  <text x="630" y="90" class="h">Your Cloudflare account</text>
+  <g>
+    <rect x="630" y="106" width="270" height="46" rx="9" fill="#ffffff" stroke="#f2c08e"/>
+    <text x="646" y="126" class="lab">Worker</text><text x="646" y="143" class="lab2">plain JavaScript, REST routes, no MCP</text>
+    <rect x="630" y="160" width="270" height="46" rx="9" fill="#ffffff" stroke="#f2c08e"/>
+    <text x="646" y="180" class="lab">D1</text><text x="646" y="197" class="lab2">memories, every version, the audit log</text>
+    <rect x="630" y="214" width="270" height="46" rx="9" fill="#ffffff" stroke="#f2c08e"/>
+    <text x="646" y="234" class="lab">Vectorize</text><text x="646" y="251" class="lab2">search by meaning</text>
+    <rect x="630" y="268" width="270" height="46" rx="9" fill="#ffffff" stroke="#f2c08e"/>
+    <text x="646" y="288" class="lab">R2</text><text x="646" y="305" class="lab2">nightly backups</text>
+    <rect x="630" y="322" width="270" height="46" rx="9" fill="#ffffff" stroke="#f2c08e"/>
+    <text x="646" y="342" class="lab">Dashboard</text><text x="646" y="359" class="lab2">search, edit and restore, behind Access</text>
+  </g>
+
+  <text x="480" y="432" class="foot" text-anchor="middle">One store. Every agent. Your account.</text>
+</svg>
