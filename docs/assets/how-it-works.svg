@@ -9,6 +9,8 @@
     .lab { font-size: 13px; font-weight: 600; }
     .lab2 { font-size: 12px; fill: #59636e; }
     .foot { font-size: 14px; font-weight: 600; fill: #1f2328; }
+    .bub { font-size: 11.5px; font-weight: 500; fill: #0a3069; }
+    @media (prefers-reduced-motion: reduce) { .anim { display: none; } }
   </style>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -58,7 +60,7 @@
   <text x="464" y="296" class="lab" text-anchor="middle">During the session</text>
   <text x="464" y="336" class="lab2" text-anchor="middle">the agent saves what it learned</text>
 
-  <text x="160" y="414" class="s" text-anchor="middle">each device has its own token</text>
+  <text x="160" y="446" class="s" text-anchor="middle">each device has its own token</text>
 
   <!-- cloudflare account -->
   <rect x="610" y="62" width="310" height="324" rx="14" fill="#fff8f0" stroke="#f6a34a"/>
@@ -74,6 +76,58 @@
     <text x="646" y="288" class="lab">R2</text><text x="646" y="305" class="lab2">nightly backups</text>
     <rect x="630" y="322" width="270" height="46" rx="9" fill="#ffffff" stroke="#f2c08e"/>
     <text x="646" y="342" class="lab">Dashboard</text><text x="646" y="359" class="lab2">search, edit and restore, behind Access</text>
+  </g>
+
+  <!-- the loop: every device loads the rules, device 1 saves, device 3 recalls -->
+  <g class="anim">
+    <circle r="6" fill="#0969da" stroke="#ffffff" stroke-width="2" opacity="0">
+      <animateMotion path="M280,104 H323 V132 H598" dur="12s" repeatCount="indefinite" calcMode="linear" keyPoints="0;0;1;1" keyTimes="0;0.0250;0.1583;1"/>
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.0250;0.0300;0.1583;0.1683;1"/>
+    </circle>
+    <circle r="6" fill="#0969da" stroke="#ffffff" stroke-width="2" opacity="0">
+      <animateMotion path="M280,224 H323 V132 H598" dur="12s" repeatCount="indefinite" calcMode="linear" keyPoints="0;0;1;1" keyTimes="0;0.0250;0.1583;1"/>
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.0250;0.0300;0.1583;0.1683;1"/>
+    </circle>
+    <circle r="6" fill="#0969da" stroke="#ffffff" stroke-width="2" opacity="0">
+      <animateMotion path="M280,344 H323 V132 H598" dur="12s" repeatCount="indefinite" calcMode="linear" keyPoints="0;0;1;1" keyTimes="0;0.0250;0.1583;1"/>
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.0250;0.0300;0.1583;0.1683;1"/>
+    </circle>
+    <rect x="630" y="106" width="270" height="46" rx="9" fill="none" stroke="#bf8700" stroke-width="3" opacity="0">
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.1583;0.1783;0.2300;0.2500;1"/>
+    </rect>
+    <g opacity="0">
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.2333;0.2533;0.5133;0.5333;1"/>
+      <rect x="58" y="152" width="214" height="24" rx="12" fill="#ddf4ff" stroke="#0969da"/>
+      <text x="70" y="168" class="bub">saves “we deploy on Tuesdays”</text>
+    </g>
+    <circle r="6" fill="#0969da" stroke="#ffffff" stroke-width="2" opacity="0">
+      <animateMotion path="M280,104 H323 V316 H598" dur="12s" repeatCount="indefinite" calcMode="linear" keyPoints="0;0;1;1" keyTimes="0;0.2833;0.4167;1"/>
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.2833;0.2883;0.4167;0.4267;1"/>
+    </circle>
+    <rect x="630" y="160" width="270" height="46" rx="9" fill="none" stroke="#bf8700" stroke-width="3" opacity="0">
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.4167;0.4367;0.5133;0.5333;1"/>
+    </rect>
+    <g opacity="0">
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.5667;0.5867;0.7800;0.8000;1"/>
+      <rect x="58" y="392" width="214" height="24" rx="12" fill="#ddf4ff" stroke="#0969da"/>
+      <text x="70" y="408" class="bub">asks “when do we deploy?”</text>
+    </g>
+    <circle r="6" fill="#0969da" stroke="#ffffff" stroke-width="2" opacity="0">
+      <animateMotion path="M280,344 H323 V224 H598" dur="12s" repeatCount="indefinite" calcMode="linear" keyPoints="0;0;1;1" keyTimes="0;0.6000;0.7167;1"/>
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.6000;0.6050;0.7167;0.7267;1"/>
+    </circle>
+    <rect x="630" y="214" width="270" height="46" rx="9" fill="none" stroke="#bf8700" stroke-width="3" opacity="0">
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.7167;0.7367;0.7967;0.8167;1"/>
+    </rect>
+    <circle r="6" fill="#1a7f37" stroke="#ffffff" stroke-width="2" opacity="0">
+      <animateMotion path="M598,224 H323 V344 H280" dur="12s" repeatCount="indefinite" calcMode="linear" keyPoints="0;0;1;1" keyTimes="0;0.7667;0.8833;1"/>
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.7667;0.7717;0.8833;0.8933;1"/>
+    </circle>
+    <g opacity="0">
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.8833;0.9033;0.9717;0.9917;1"/>
+      <rect x="58" y="392" width="214" height="24" rx="12" fill="#ddf4ff" stroke="#0969da"/>
+      <text x="70" y="408" class="bub">recalls “we deploy on Tuesdays”</text>
+    </g>
   </g>
 
   <text x="480" y="432" class="foot" text-anchor="middle">One store. Every agent. Your account.</text>
