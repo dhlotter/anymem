@@ -29,7 +29,8 @@ jobs:
 
   client:
     name: Client tests (Python ${{ matrix.python-version }})
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
+    # ubuntu-24.04, not ubuntu-latest: setup-python has no Python 3.9 build for Ubuntu 26.04, and 3.9 is the oldest Python we support
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-24.04"') }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
