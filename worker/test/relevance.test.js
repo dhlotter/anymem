@@ -58,11 +58,11 @@ test("one plain rare word is not enough, a body hit or a common word does not co
 });
 
 test("one rare word that looks like a name in the prompt is relevant", () => {
-  assert.equal(check({ similarity: 0.3, terms: [t("moerdyk", 2, 6.4)], query: "what do we owe on Moerdyk this month" }), true);
+  assert.equal(check({ similarity: 0.3, terms: [t("hollowmere", 2, 6.4)], query: "what do we owe on Hollowmere this month" }), true);
   assert.equal(check({ similarity: 0.3, terms: [t("abc", 2, 6.4)], query: "status of ticket ABC-12027 please" }), true);
   assert.equal(check({ similarity: 0.3, terms: [t("phoneleash", 2, 6.4)], query: "tell me about phoneLeash today" }), true);
   assert.equal(check({ similarity: 0.3, terms: [t("residential")], query: "residential address of my dad" }), false);
-  assert.equal(check({ similarity: 0.3, terms: [t("moerdyk", 2, 5.5)], query: "what do we owe on Moerdyk this month" }), false, "a name like word needs idf 6, a word in a few memories is not enough");
+  assert.equal(check({ similarity: 0.3, terms: [t("hollowmere", 2, 5.5)], query: "what do we owe on Hollowmere this month" }), false, "a name like word needs idf 6, a word in a few memories is not enough");
 });
 
 test("looksLikeName follows the client rule", () => {
@@ -75,8 +75,8 @@ test("looksLikeName follows the client rule", () => {
   const workerSrc = readFileSync(fileURLToPath(new URL("../search/relevance.js", import.meta.url)), "utf8");
   for (const p of shapes) assert.ok(workerSrc.includes(`/${p}/`), `the Worker uses ${p}`);
   assert.ok(workerSrc.includes("Math.max(4, t.length - 2)") && workerSrc.includes("Math.max(4, low.length - 2)"));
-  assert.equal(looksLikeName("moerdyk", "what about Moerdyk rent"), true);
-  assert.equal(looksLikeName("moerdyk", "Moerdyk is the first word"), false, "capitalised only because it opens the prompt");
+  assert.equal(looksLikeName("hollowmere", "what about Hollowmere rent"), true);
+  assert.equal(looksLikeName("hollowmere", "Hollowmere is the first word"), false, "capitalised only because it opens the prompt");
   assert.equal(looksLikeName("oauth", "which oauth flow"), false);
   assert.equal(looksLikeName("backup", "the s3_backup bucket"), false);
   assert.equal(looksLikeName("zcode", "install zcode.native"), true);

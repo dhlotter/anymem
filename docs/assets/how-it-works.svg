@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 470" width="960" height="470" role="img" aria-labelledby="t d">
+  <title id="t">How anymem works</title>
+  <desc id="d">Agents on every device read and write one memory store in your own Cloudflare account. At session start they load the always on rules, on every prompt they get the closest memories, and during the session they save what they learn.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: #1f2328; }
+    .h { font-size: 15px; font-weight: 600; }
+    .s { font-size: 12.5px; fill: #59636e; }
+    .chip { font-size: 12px; font-weight: 500; }
+    .lab { font-size: 13px; font-weight: 600; }
+    .lab2 { font-size: 12px; fill: #59636e; }
+    .foot { font-size: 14px; font-weight: 600; fill: #1f2328; }
+    .bub { font-size: 11.5px; font-weight: 500; fill: #0a3069; }
+    @media (prefers-reduced-motion: reduce) { .anim { display: none; } }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8c959f"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="470" rx="18" fill="#ffffff"/>
+  <rect x="0.5" y="0.5" width="959" height="469" rx="18" fill="none" stroke="#d1d9e0"/>
+
+  <!-- devices -->
+  <text x="40" y="44" class="h">Every device you work on</text>
+  <g>
+    <rect x="40" y="62" width="240" height="84" rx="12" fill="#f6f8fa" stroke="#d1d9e0"/>
+    <text x="58" y="88" class="h">Device 1</text>
+    <rect x="58" y="104" width="94" height="26" rx="13" fill="#ddf4ff" stroke="#54aeff"/><text x="105" y="121" class="chip" text-anchor="middle">Claude Code</text>
+    <rect x="160" y="104" width="62" height="26" rx="13" fill="#ddf4ff" stroke="#54aeff"/><text x="191" y="121" class="chip" text-anchor="middle">Codex</text>
+  </g>
+  <g>
+    <rect x="40" y="182" width="240" height="84" rx="12" fill="#f6f8fa" stroke="#d1d9e0"/>
+    <text x="58" y="208" class="h">Device 2</text>
+    <rect x="58" y="224" width="94" height="26" rx="13" fill="#ddf4ff" stroke="#54aeff"/><text x="105" y="241" class="chip" text-anchor="middle">Claude Code</text>
+    <rect x="160" y="224" width="64" height="26" rx="13" fill="#ddf4ff" stroke="#54aeff"/><text x="192" y="241" class="chip" text-anchor="middle">ZCode</text>
+  </g>
+  <g>
+    <rect x="40" y="302" width="240" height="84" rx="12" fill="#f6f8fa" stroke="#d1d9e0"/>
+    <text x="58" y="328" class="h">Device 3</text>
+    <rect x="58" y="344" width="62" height="26" rx="13" fill="#ddf4ff" stroke="#54aeff"/><text x="89" y="361" class="chip" text-anchor="middle">Codex</text>
+    <rect x="128" y="344" width="48" height="26" rx="13" fill="#ddf4ff" stroke="#54aeff"/><text x="152" y="361" class="chip" text-anchor="middle">Kilo</text>
+    <rect x="184" y="344" width="56" height="26" rx="13" fill="#ddf4ff" stroke="#54aeff"/><text x="212" y="361" class="chip" text-anchor="middle">Cline</text>
+  </g>
+
+  <!-- every device joins one line -->
+  <path d="M280,104 H318 M280,224 H318 M280,344 H318" stroke="#8c959f" stroke-width="2" fill="none"/>
+  <rect x="318" y="96" width="10" height="256" rx="5" fill="#8c959f"/>
+
+  <!-- flows, the same for every device -->
+  <line x1="328" y1="132" x2="600" y2="132" stroke="#8c959f" stroke-width="2" marker-end="url(#a)"/>
+  <text x="464" y="112" class="lab" text-anchor="middle">Session start</text>
+  <text x="464" y="152" class="lab2" text-anchor="middle">loads your always on rules</text>
+
+  <line x1="336" y1="224" x2="600" y2="224" stroke="#8c959f" stroke-width="2" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="468" y="204" class="lab" text-anchor="middle">Every prompt</text>
+  <text x="468" y="244" class="lab2" text-anchor="middle">adds the closest memories, or nothing</text>
+
+  <line x1="328" y1="316" x2="600" y2="316" stroke="#8c959f" stroke-width="2" marker-end="url(#a)"/>
+  <text x="464" y="296" class="lab" text-anchor="middle">During the session</text>
+  <text x="464" y="336" class="lab2" text-anchor="middle">the agent saves what it learned</text>
+
+  <text x="160" y="446" class="s" text-anchor="middle">each device has its own token</text>
+
+  <!-- cloudflare account -->
+  <rect x="610" y="62" width="310" height="324" rx="14" fill="#fff8f0" stroke="#f6a34a"/>
+  <text x="630" y="90" class="h">Your Cloudflare account</text>
+  <g>
+    <rect x="630" y="106" width="270" height="46" rx="9" fill="#ffffff" stroke="#f2c08e"/>
+    <text x="646" y="126" class="lab">Worker</text><text x="646" y="143" class="lab2">plain JavaScript, REST routes, no MCP</text>
+    <rect x="630" y="160" width="270" height="46" rx="9" fill="#ffffff" stroke="#f2c08e"/>
+    <text x="646" y="180" class="lab">D1</text><text x="646" y="197" class="lab2">memories, every version, the audit log</text>
+    <rect x="630" y="214" width="270" height="46" rx="9" fill="#ffffff" stroke="#f2c08e"/>
+    <text x="646" y="234" class="lab">Vectorize</text><text x="646" y="251" class="lab2">search by meaning</text>
+    <rect x="630" y="268" width="270" height="46" rx="9" fill="#ffffff" stroke="#f2c08e"/>
+    <text x="646" y="288" class="lab">R2</text><text x="646" y="305" class="lab2">nightly backups</text>
+    <rect x="630" y="322" width="270" height="46" rx="9" fill="#ffffff" stroke="#f2c08e"/>
+    <text x="646" y="342" class="lab">Dashboard</text><text x="646" y="359" class="lab2">search, edit and restore, behind Access</text>
+  </g>
+
+  <!-- the loop: every device loads the rules, device 1 saves, device 3 recalls -->
+  <g class="anim">
+    <circle r="6" fill="#0969da" stroke="#ffffff" stroke-width="2" opacity="0">
+      <animateMotion path="M280,104 H323 V132 H598" dur="12s" repeatCount="indefinite" calcMode="linear" keyPoints="0;0;1;1" keyTimes="0;0.0250;0.1583;1"/>
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.0250;0.0300;0.1583;0.1683;1"/>
+    </circle>
+    <circle r="6" fill="#0969da" stroke="#ffffff" stroke-width="2" opacity="0">
+      <animateMotion path="M280,224 H323 V132 H598" dur="12s" repeatCount="indefinite" calcMode="linear" keyPoints="0;0;1;1" keyTimes="0;0.0250;0.1583;1"/>
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.0250;0.0300;0.1583;0.1683;1"/>
+    </circle>
+    <circle r="6" fill="#0969da" stroke="#ffffff" stroke-width="2" opacity="0">
+      <animateMotion path="M280,344 H323 V132 H598" dur="12s" repeatCount="indefinite" calcMode="linear" keyPoints="0;0;1;1" keyTimes="0;0.0250;0.1583;1"/>
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.0250;0.0300;0.1583;0.1683;1"/>
+    </circle>
+    <rect x="630" y="106" width="270" height="46" rx="9" fill="none" stroke="#bf8700" stroke-width="3" opacity="0">
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.1583;0.1783;0.2300;0.2500;1"/>
+    </rect>
+    <g opacity="0">
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.2333;0.2533;0.5133;0.5333;1"/>
+      <rect x="58" y="152" width="214" height="24" rx="12" fill="#ddf4ff" stroke="#0969da"/>
+      <text x="70" y="168" class="bub">saves “we deploy on Tuesdays”</text>
+    </g>
+    <circle r="6" fill="#0969da" stroke="#ffffff" stroke-width="2" opacity="0">
+      <animateMotion path="M280,104 H323 V316 H598" dur="12s" repeatCount="indefinite" calcMode="linear" keyPoints="0;0;1;1" keyTimes="0;0.2833;0.4167;1"/>
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.2833;0.2883;0.4167;0.4267;1"/>
+    </circle>
+    <rect x="630" y="160" width="270" height="46" rx="9" fill="none" stroke="#bf8700" stroke-width="3" opacity="0">
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.4167;0.4367;0.5133;0.5333;1"/>
+    </rect>
+    <g opacity="0">
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.5667;0.5867;0.7800;0.8000;1"/>
+      <rect x="58" y="392" width="214" height="24" rx="12" fill="#ddf4ff" stroke="#0969da"/>
+      <text x="70" y="408" class="bub">asks “when do we deploy?”</text>
+    </g>
+    <circle r="6" fill="#0969da" stroke="#ffffff" stroke-width="2" opacity="0">
+      <animateMotion path="M280,344 H323 V224 H598" dur="12s" repeatCount="indefinite" calcMode="linear" keyPoints="0;0;1;1" keyTimes="0;0.6000;0.7167;1"/>
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.6000;0.6050;0.7167;0.7267;1"/>
+    </circle>
+    <rect x="630" y="214" width="270" height="46" rx="9" fill="none" stroke="#bf8700" stroke-width="3" opacity="0">
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.7167;0.7367;0.7967;0.8167;1"/>
+    </rect>
+    <circle r="6" fill="#1a7f37" stroke="#ffffff" stroke-width="2" opacity="0">
+      <animateMotion path="M598,224 H323 V344 H280" dur="12s" repeatCount="indefinite" calcMode="linear" keyPoints="0;0;1;1" keyTimes="0;0.7667;0.8833;1"/>
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.7667;0.7717;0.8833;0.8933;1"/>
+    </circle>
+    <g opacity="0">
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;0.8833;0.9033;0.9717;0.9917;1"/>
+      <rect x="58" y="392" width="214" height="24" rx="12" fill="#ddf4ff" stroke="#0969da"/>
+      <text x="70" y="408" class="bub">recalls “we deploy on Tuesdays”</text>
+    </g>
+  </g>
+
+  <text x="480" y="432" class="foot" text-anchor="middle">One store. Every agent. Your account.</text>
+</svg>

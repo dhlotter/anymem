@@ -23,7 +23,7 @@ test("each rule can be the one that holds", () => {
   assert.deepEqual(met({ similarity: 0.8 }), ["close_in_meaning"]);
   assert.deepEqual(met({ position: 0, denseRank: 1, keywordRank: 2, terms: [t("alpha", 2, 4), t("beta", 2, 3)] }), ["agreement"]);
   assert.deepEqual(met({ terms: [t("residential"), t("scraping")] }), ["two_rare_words"]);
-  assert.deepEqual(met({ terms: [t("moerdyk", 2, 6.4)], query: "what do we owe on Moerdyk this month" }), ["name_word"]);
+  assert.deepEqual(met({ terms: [t("hollowmere", 2, 6.4)], query: "what do we owe on Hollowmere this month" }), ["name_word"]);
   assert.deepEqual(met({ position: 0, keywordRank: 1, coverage: 0.9, words: 2, query: "status of ABC-12027", terms: [t("abc", 1, 5.5)] }), ["lookup"]);
 });
 
@@ -42,8 +42,8 @@ test("isRelevant says yes for the hits a person would call relevant, and no for 
     [{ similarity: 0.74 }, false, "just under the cutoff with nothing else"],
     [{ similarity: 0.3, terms: [t("a", 2, 5), t("b", 2, 5.5)] }, true, "two rare words by name"],
     [{ similarity: 0.3, terms: [t("a", 2, 5)] }, false, "one plain rare word"],
-    [{ similarity: 0.3, terms: [t("moerdyk", 2, 6.4)], query: "ask about Moerdyk now" }, true, "one name like word in the prompt"],
-    [{ similarity: 0.3, terms: [t("moerdyk", 2, 6.4)], query: "ask about moerdyk now" }, false, "the same word in lower case is no name"],
+    [{ similarity: 0.3, terms: [t("hollowmere", 2, 6.4)], query: "ask about Hollowmere now" }, true, "one name like word in the prompt"],
+    [{ similarity: 0.3, terms: [t("hollowmere", 2, 6.4)], query: "ask about hollowmere now" }, false, "the same word in lower case is no name"],
     [{ similarity: 0.7, rerank: 0.5 }, true, "a reranker score the cosine supports"],
     [{ similarity: 0.5, rerank: 0.5 }, false, "a reranker score on a hit far in meaning"],
     [{ similarity: null, rerank: null }, false, "nothing matched"],
