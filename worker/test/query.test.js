@@ -26,7 +26,7 @@ test("whitespace is collapsed", () => {
 test("answer format sentences are dropped, task sentences are kept", () => {
   assert.equal(cleanQuery("Which sign in flow does Alex prefer? Answer in one sentence."), "Which sign in flow does Alex prefer?");
   assert.equal(cleanQuery("Which sign in flow does Alex prefer? Be brief. Say NONE if nothing fits."), "Which sign in flow does Alex prefer?");
-  assert.equal(cleanQuery("What do we know about the Moerdyk rent? Use only the memories. Please answer in two words."), "What do we know about the Moerdyk rent?");
+  assert.equal(cleanQuery("What do we know about the Hollowmere rent? Use only the memories. Please answer in two words."), "What do we know about the Hollowmere rent?");
   assert.equal(cleanQuery("Fix the failing test in the billing module. Keep it short."), "Fix the failing test in the billing module.");
   assert.equal(cleanQuery("Fix the failing test in billing."), "Fix the failing test in billing.");
 });

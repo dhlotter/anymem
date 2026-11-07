@@ -35,6 +35,7 @@ const FORBIDDEN_TEXT = [
   { text: w("Tes", "sa"), ci: true }, // a name that must not ship
   { text: w("anymem", "-next"), ci: true }, // a name that must not ship
   { text: w("dhlotter", ".workers"), ci: true }, // a name that must not ship
+  { text: w("Moer", "dyk"), ci: true }, // a street name that must not ship
 ];
 
 // Shapes of real secrets. The sample is built at runtime and only used by the self-test.
