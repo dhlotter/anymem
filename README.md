@@ -10,7 +10,7 @@
 Tell one agent something once. Every agent on every machine knows it next time, Claude Code on your laptop, Codex on a server, ZCode at work. The memory lives in a Worker, a D1 database and a Vectorize index that you own.
 
 <p align="center">
-  <img src="docs/assets/how-it-works.svg" alt="Agents on several machines read and write one memory store in your own Cloudflare account" width="860">
+  <img src="docs/assets/how-it-works.svg" alt="Agents on every device read and write one memory store in your own Cloudflare account" width="860">
 </p>
 
 ## Why it exists
